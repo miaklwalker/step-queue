@@ -1,0 +1,11 @@
+{
+	"scripts": {
+		"format": "biome format --write",
+		"fix": "biome lint --write"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.5",
+		"@types/node": "^26.1.1",
+		"bullmq": "^5.81.0"
+	}
+}
