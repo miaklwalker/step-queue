@@ -27,11 +27,14 @@ const signup = new QueueSystem(NameFactory({ name: "signup", env: "example" }))
 			.addStep({
 				name: "reserveUsername",
 				handler: async (job) => {
-					// pretend the username service is flaky on the first try
+					// pretend the username service is flaky on the first try. Throwing
+					// a plain error lets BullMQ retry the job natively (enqueue with
+					// `attempts` > 1); it resumes from this step, since the processor
+					// persists its position in the job data.
 					const tries = (attempts.get(job.data.email) ?? 0) + 1;
 					attempts.set(job.data.email, tries);
 					if (tries < 2) {
-						throw new job.actionErrors.retry("reserveUsername", {}, 3);
+						throw new Error("username service unavailable, retrying");
 					}
 					return { username: job.data.email.split("@")[0] ?? "user" };
 				},
@@ -68,13 +71,14 @@ const signup = new QueueSystem(NameFactory({ name: "signup", env: "example" }))
 	);
 signup.addToSystem("Examples");
 // async function run(input: { email: string; optOutOfEmail: boolean }) {
-// 	const job = await signup.addJob(input);
+// 	// `attempts` lets BullMQ retry the flaky step natively, resuming where it left off.
+// 	const job = await signup.addJob(input, { attempts: 3 });
 // 	const result = await job.waitUntilFinished(signup.QueueEvents, 10_000);
 // 	console.log(`${input.email} ->`, result);
 // }
 //
 // await run({ email: "not-an-email", optOutOfEmail: false }); // earlyExit
-// await run({ email: "ada@example.com", optOutOfEmail: false }); // retry, full path
+// await run({ email: "ada@example.com", optOutOfEmail: false }); // native retry, full path
 // await run({ email: "grace@example.com", optOutOfEmail: true }); // skip grantTrial
 //
 // await signup.close();

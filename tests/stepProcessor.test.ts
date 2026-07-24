@@ -80,54 +80,6 @@ describe("Step control flow (end-to-end via BullMQ)", () => {
 		assert.deepStrictEqual(ran, ["A"]);
 	});
 
-	test("retry re-runs a step until it succeeds", async () => {
-		let attempts = 0;
-		const queue = track(
-			new QueueSystem(NameFactory({ name: uniqueName("retry-ok") }))
-				.defineInputSchema(empty)
-				.defineConnection(connection)
-				.defineProcessor((step) =>
-					step
-						.addStep({
-							name: "flaky",
-							handler: async (job) => {
-								attempts += 1;
-								if (attempts < 3) {
-									throw new job.actionErrors.retry("flaky", {}, 5);
-								}
-								return { attempts };
-							},
-						})
-						.addFinalStep({
-							handler: async (job) => ({ attempts: job.data.attempts }),
-						}),
-				),
-		);
-
-		const out = await runToCompletion(queue, {});
-		assert.deepStrictEqual(out, { attempts: 3 });
-	});
-
-	test("retry throws once max retries is exceeded", async () => {
-		const queue = track(
-			new QueueSystem(NameFactory({ name: uniqueName("retry-max") }))
-				.defineInputSchema(empty)
-				.defineConnection(connection)
-				.defineProcessor((step) =>
-					step
-						.addStep({
-							name: "always-fails",
-							handler: async (job) => {
-								throw new job.actionErrors.retry("always-fails", {}, 2);
-							},
-						})
-						.addFinalStep({ handler: async () => ({}) }),
-				),
-		);
-
-		await assert.rejects(() => runToCompletion(queue, {}), /Max retries/);
-	});
-
 	test("rollback runs for completed steps on failure", async () => {
 		const rolledBack: string[] = [];
 		const queue = track(

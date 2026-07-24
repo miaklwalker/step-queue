@@ -1,3 +1,7 @@
+import type {
+	StandardJSONSchemaV1,
+	StandardSchemaV1,
+} from "@standard-schema/spec";
 import {
 	type ConnectionOptions,
 	type Job,
@@ -9,10 +13,14 @@ import {
 	Worker,
 	type WorkerListener,
 } from "bullmq";
-import { type ZodType, z } from "zod";
 import { DEFAULT_JOB_OPTIONS } from "./const.ts";
 import { ProcessorBuilder } from "./processorBuilder.ts";
-import type { ErrorRegistry, JSONLike, TypedJob } from "./types.ts";
+import {
+	type ErrorRegistry,
+	type JSONLike,
+	SchemaValidationError,
+	type TypedJob,
+} from "./types.ts";
 
 /**
  * A fully type-safe, step-based wrapper around a BullMQ queue + worker.
@@ -51,7 +59,7 @@ export class QueueSystem<
 	queue: Queue<TInput, TOutput, TName, TInput, TOutput, TName> | undefined;
 	worker: Worker<TInput, TOutput, TName> | undefined;
 
-	private _schema: ZodType | undefined;
+	private _schema: StandardSchemaV1 | undefined;
 	private _connection: ConnectionOptions | undefined;
 	private _concurrency = 1;
 	private _queueEvents: QueueEvents | undefined;
@@ -65,14 +73,28 @@ export class QueueSystem<
 	}
 
 	/**
-	 * Provide a Zod schema describing the job input. The processor's initial
-	 * data type is inferred from it, and jobs are validated against it at runtime.
+	 * Provide a [Standard Schema](https://standardschema.dev) describing the job
+	 * input — any compliant library works (Zod, Valibot, ArkType, Effect Schema,
+	 * ...). The processor's initial data type is inferred from the schema's
+	 * output type, and jobs are validated against it at runtime.
+	 *
+	 * If the schema's vendor supports JSON Schema conversion
+	 * (`StandardJSONSchemaV1`), `jsonSchema` is populated as well.
 	 */
 	defineInputSchema<TSchema extends JSONLike>(
-		schema: ZodType<TSchema>,
+		schema: StandardSchemaV1<unknown, TSchema>,
 	): QueueSystem<TSchema, TOutput, TName> {
 		this._schema = schema;
-		this.jsonSchema = z.toJSONSchema(schema) as Record<string, unknown>;
+		const props = schema["~standard"];
+		if ("jsonSchema" in props) {
+			try {
+				this.jsonSchema = (
+					props as StandardJSONSchemaV1.Props<unknown, TSchema>
+				).jsonSchema.input({ target: "draft-2020-12" });
+			} catch {
+				// The vendor doesn't support this target; leave jsonSchema unset.
+			}
+		}
 		return this as unknown as QueueSystem<TSchema, TOutput, TName>;
 	}
 
@@ -169,13 +191,20 @@ export class QueueSystem<
 		return this.queue;
 	}
 
-	private _validate(jobData: TInput): TInput {
-		return this._schema ? (this._schema.parse(jobData) as TInput) : jobData;
+	private async _validate(jobData: TInput): Promise<TInput> {
+		if (!this._schema) {
+			return jobData;
+		}
+		const result = await this._schema["~standard"].validate(jobData);
+		if (result.issues) {
+			throw new SchemaValidationError(result.issues);
+		}
+		return result.value as TInput;
 	}
 
 	async addJob(jobData: TInput, options?: JobsOptions) {
 		const queue = this._requireQueue();
-		return await queue.add(this.name, this._validate(jobData), {
+		return await queue.add(this.name, await this._validate(jobData), {
 			...DEFAULT_JOB_OPTIONS,
 			...options,
 		});
@@ -184,11 +213,13 @@ export class QueueSystem<
 	async addBulkJobs(jobs: Array<{ data: TInput; opts?: JobsOptions }>) {
 		const queue = this._requireQueue();
 		return await queue.addBulk(
-			jobs.map((job) => ({
-				name: this.name,
-				data: this._validate(job.data),
-				opts: { ...DEFAULT_JOB_OPTIONS, ...job.opts },
-			})),
+			await Promise.all(
+				jobs.map(async (job) => ({
+					name: this.name,
+					data: await this._validate(job.data),
+					opts: { ...DEFAULT_JOB_OPTIONS, ...job.opts },
+				})),
+			),
 		);
 	}
 
@@ -279,7 +310,7 @@ export class QueueSystem<
 }
 
 export type QueueInput<T> =
-// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
+	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 	T extends QueueSystem<infer I, any, any> ? I : never;
 export type QueueOutput<T> =
 	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>

@@ -61,7 +61,7 @@ export const myQueue = new QueueSystem(
 myQueue.addDescription("this is a description");
 // console.log("Adding job");
 // const job = await myQueue.addJob({
-// 	user: "Michael",
+// 	user: "USERNAME",
 // 	originalPassword: "Your password must match",
 // 	newPassword: "Your password must not match!!",
 // });

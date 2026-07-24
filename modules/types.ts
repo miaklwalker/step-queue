@@ -1,3 +1,4 @@
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import type { Job } from "bullmq";
 import type { QueueSystem } from "./queueSystem.ts";
 
@@ -46,13 +47,13 @@ export type StepConfig = {
 	 */
 	rollbackKeys?: readonly string[];
 	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
-	rollback?: (job: any, token: Job['token']) => Promise<void>;
+	rollback?: (job: any, token: Job["token"]) => Promise<void>;
 	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
-	handler: (job: any, token: Job['token']) => Promise<any>;
+	handler: (job: any, token: Job["token"]) => Promise<any>;
 	progressReport?: (
-	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
+		// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 		job: any,
-		token: Job['token'],
+		token: Job["token"],
 		stepName: string,
 		status: ProgressStatus,
 	) => Promise<void>;
@@ -60,6 +61,29 @@ export type StepConfig = {
 	singleChild?: boolean;
 	processChildResult?: (results: any) => any;
 };
+
+/** Thrown when job data fails validation against the queue's input schema. */
+export class SchemaValidationError extends Error {
+	constructor(public readonly issues: ReadonlyArray<StandardSchemaV1.Issue>) {
+		super(
+			issues
+				.map((issue) => {
+					const path = issue.path
+						?.map((segment) =>
+							String(
+								typeof segment === "object" && segment !== null
+									? segment.key
+									: segment,
+							),
+						)
+						.join(".");
+					return path ? `${path}: ${issue.message}` : issue.message;
+				})
+				.join("; "),
+		);
+		this.name = "SchemaValidationError";
+	}
+}
 
 export class AddStepError extends Error {
 	constructor(message: string) {
@@ -102,21 +126,9 @@ export class EarlyExitError extends Error {
 	}
 }
 
-export class RetryStepError extends Error {
-	constructor(
-		public readonly step: string,
-		// biome-ignore lint/suspicious/noExplicitAny: <todo: fix this one>
-		public readonly currentData?: any,
-		public readonly maxRetries: number = 3,
-	) {
-		super(`RetryStep:${step}`);
-		this.name = "RetryStepError";
-	}
-}
 export const actionErrors = {
 	skip: SkipStepError,
 	earlyExit: EarlyExitError,
-	retry: RetryStepError,
 	skipToFinal: SkipToFinalError,
 };
 

@@ -1,9 +1,11 @@
 import assert from "node:assert";
 import test, { after, before, describe } from "node:test";
+import type { StandardSchemaV1 } from "@standard-schema/spec";
 import { z } from "zod";
 import { NameFactory } from "../modules/nameFactory.ts";
 import { ProcessorBuilder } from "../modules/processorBuilder.ts";
 import { type QueueOutput, QueueSystem } from "../modules/queueSystem.ts";
+import { SchemaValidationError } from "../modules/types.ts";
 import {
 	closeAll,
 	connection,
@@ -32,6 +34,29 @@ describe("QueueSystem builder (no connection needed)", () => {
 		};
 		assert.strictEqual(schema.type, "object");
 		assert.ok("greeting" in schema.properties);
+	});
+
+	test("accepts a non-Zod Standard Schema and leaves jsonSchema unset", () => {
+		// A hand-rolled Standard Schema — any spec-compliant library works.
+		const custom: StandardSchemaV1<unknown, { n: number }> = {
+			"~standard": {
+				version: 1,
+				vendor: "hand-rolled",
+				validate: (value) => {
+					const v = value as { n?: unknown };
+					return typeof v?.n === "number"
+						? { value: { n: v.n } }
+						: { issues: [{ message: "n must be a number", path: ["n"] }] };
+				},
+			},
+		};
+		const q = new QueueSystem(NameFactory({ name: "Q" })).defineInputSchema(
+			custom,
+		);
+		type In = Parameters<typeof q.addJob>[0];
+		type _ = Expect<Equal<In, { n: number }>>;
+		// The vendor exposes no JSON Schema converter, so none is derived.
+		assert.strictEqual(q.jsonSchema, undefined);
 	});
 
 	test("defineProcessor throws if connection was not defined", () => {
@@ -137,6 +162,235 @@ describe("QueueSystem (end-to-end via BullMQ)", () => {
 		// A value whose runtime type violates the schema (cast past the compiler
 		// on purpose, without using `any`).
 		const bad = { n: "not a number" } as unknown as { n: number };
-		await assert.rejects(() => queue.addJob(bad));
+		await assert.rejects(() => queue.addJob(bad), SchemaValidationError);
+	});
+
+	test("validates via a non-Zod Standard Schema at enqueue time", async () => {
+		const custom: StandardSchemaV1<unknown, { n: number }> = {
+			"~standard": {
+				version: 1,
+				vendor: "hand-rolled",
+				validate: (value) => {
+					const v = value as { n?: unknown };
+					return typeof v?.n === "number"
+						? { value: { n: v.n } }
+						: { issues: [{ message: "n must be a number", path: ["n"] }] };
+				},
+			},
+		};
+		const queue = track(
+			new QueueSystem(NameFactory({ name: uniqueName("std-schema") }))
+				.defineInputSchema(custom)
+				.defineConnection(connection)
+				.defineProcessor((step) =>
+					step.addStep({ name: "noop", handler: async () => ({}) }),
+				),
+		);
+
+		const bad = { n: "nope" } as unknown as { n: number };
+		await assert.rejects(
+			() => queue.addJob(bad),
+			(err: unknown) =>
+				err instanceof SchemaValidationError &&
+				err.message === "n: n must be a number",
+		);
+		await queue.addJob({ n: 1 });
+	});
+});
+
+describe("processor action errors (control flow)", () => {
+	before(ensureRedis);
+	after(closeAll);
+
+	test("earlyExit returns its value and bypasses every later step", async () => {
+		const visited: string[] = [];
+		const queue = track(
+			new QueueSystem(NameFactory({ name: uniqueName("early-exit") }))
+				.defineInputSchema(z.object({ email: z.string() }))
+				.defineConnection(connection)
+				.defineProcessor((step) =>
+					step
+						.addStep({
+							name: "validate",
+							handler: async (job) => {
+								visited.push("validate");
+								throw new job.actionErrors.earlyExit({
+									status: "rejected",
+									reason: "invalid email",
+								});
+							},
+						})
+						.addStep({
+							name: "enrich",
+							handler: async () => {
+								visited.push("enrich");
+								return { enriched: true };
+							},
+						})
+						.addFinalStep({
+							handler: async () => {
+								visited.push("final");
+								return { status: "created" };
+							},
+						}),
+				),
+		);
+
+		const out = await runToCompletion(queue, { email: "nope" });
+		// earlyExit's value is returned verbatim as the job result.
+		assert.deepStrictEqual(out, {
+			status: "rejected",
+			reason: "invalid email",
+		});
+		// No later step ran — not even the final step.
+		assert.deepStrictEqual(visited, ["validate"]);
+	});
+
+	test("skip jumps to the named step, bypassing the ones in between", async () => {
+		const visited: string[] = [];
+		const queue = track(
+			new QueueSystem(NameFactory({ name: uniqueName("skip-named") }))
+				.defineInputSchema(z.object({ start: z.string() }))
+				.defineConnection(connection)
+				.defineProcessor((step) =>
+					step
+						.addStep({
+							name: "a",
+							handler: async (job) => {
+								visited.push("a");
+								throw new job.actionErrors.skip("c", { emailed: false });
+							},
+						})
+						.addStep({
+							name: "b",
+							handler: async () => {
+								visited.push("b");
+								return { ran_b: true };
+							},
+						})
+						.addStep({
+							name: "c",
+							handler: async () => {
+								visited.push("c");
+								return { ran_c: true };
+							},
+						})
+						.addFinalStep({
+							handler: async (job) => {
+								visited.push("final");
+								const data = job.data as Record<string, unknown>;
+								return {
+									emailed: data.emailed,
+									ran_b: data.ran_b ?? false,
+									ran_c: data.ran_c ?? false,
+								};
+							},
+						}),
+				),
+		);
+
+		const out = await runToCompletion(queue, { start: "go" });
+		// "b" is skipped; "c" and the final step still run.
+		assert.deepStrictEqual(visited, ["a", "c", "final"]);
+		// skip's result payload is merged into the job data before the target runs.
+		assert.deepStrictEqual(out, {
+			emailed: false,
+			ran_b: false,
+			ran_c: true,
+		});
+	});
+
+	test("skipToFinal jumps straight to the final step, merging its result", async () => {
+		const visited: string[] = [];
+		const queue = track(
+			new QueueSystem(NameFactory({ name: uniqueName("skip-final") }))
+				.defineInputSchema(z.object({ start: z.string() }))
+				.defineConnection(connection)
+				.defineProcessor((step) =>
+					step
+						.addStep({
+							name: "a",
+							handler: async (job) => {
+								visited.push("a");
+								throw new job.actionErrors.skipToFinal(null, {
+									jumped: true,
+								});
+							},
+						})
+						.addStep({
+							name: "b",
+							handler: async () => {
+								visited.push("b");
+								return { ran_b: true };
+							},
+						})
+						.addStep({
+							name: "c",
+							handler: async () => {
+								visited.push("c");
+								return { ran_c: true };
+							},
+						})
+						.addFinalStep({
+							handler: async (job) => {
+								visited.push("final");
+								const data = job.data as Record<string, unknown>;
+								return { done: true, jumped: data.jumped };
+							},
+						}),
+				),
+		);
+
+		const out = await runToCompletion(queue, { start: "go" });
+		// Everything between the throwing step and the final step is bypassed.
+		assert.deepStrictEqual(visited, ["a", "final"]);
+		assert.deepStrictEqual(out, { done: true, jumped: true });
+	});
+
+	test("a rejected step runs rollbacks in reverse and fails the job", async () => {
+		const visited: string[] = [];
+		const rolledBack: string[] = [];
+		const queue = track(
+			new QueueSystem(NameFactory({ name: uniqueName("rollback-reverse") }))
+				.defineInputSchema(z.object({ start: z.string() }))
+				.defineConnection(connection)
+				.defineProcessor((step) =>
+					step
+						.addStep({
+							name: "a",
+							rollbackKeys: ["ran_a"],
+							handler: async () => {
+								visited.push("a");
+								return { ran_a: true };
+							},
+							rollback: async (job) => {
+								const data = job.data as Record<string, unknown>;
+								rolledBack.push(`a:${String(data.ran_a)}`);
+							},
+						})
+						.addStep({
+							name: "b",
+							handler: async () => {
+								visited.push("b");
+								throw new Error("boom");
+							},
+						})
+						.addFinalStep({
+							handler: async () => {
+								visited.push("final");
+								return { done: true };
+							},
+						}),
+				),
+		);
+
+		await assert.rejects(
+			() => runToCompletion(queue, { start: "go" }),
+			/boom/,
+		);
+		// "b" throws, so the final step never runs.
+		assert.deepStrictEqual(visited, ["a", "b"]);
+		// "a" completed, so its rollback fires with its requested keys.
+		assert.deepStrictEqual(rolledBack, ["a:true"]);
 	});
 });

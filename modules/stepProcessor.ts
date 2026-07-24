@@ -5,7 +5,6 @@ import {
 	EarlyExitError,
 	type ErrorRegistry,
 	ProcessorStepError,
-	RetryStepError,
 	SkipStepError,
 	SkipToFinalError,
 	type StepConfig,
@@ -148,10 +147,6 @@ export function StepProcessor<TInput, TResult>(
         await stepLog(`Starting Step: ${String(currentStep)}`);
         let previousStep: StepNames | null = jobData?.previousStep ?? null;
 
-        const stepRetryCount: Record<keyof typeof processorConfig.steps, number> =
-            {};
-
-
         while (currentStep) {
             if (currentStep === WAIT_CHILDREN) {
                 if (!token) {
@@ -249,7 +244,6 @@ export function StepProcessor<TInput, TResult>(
             let skipOccurred = false;
             let skipTarget: StepNames | null = null;
             let earlyExit = false;
-            let retrying = false;
             await job.updateProgress({step: stepConfig.name, progress: 0});
             const result = await stepConfig
                 .handler(jobProxy, token ?? "")
@@ -268,28 +262,6 @@ export function StepProcessor<TInput, TResult>(
                         earlyExit = true;
                         return err.returnValue;
                     }
-                    if (err instanceof RetryStepError) {
-                        stepRetryCount[currentStep] =
-                            (stepRetryCount[currentStep] ?? 0) + 1;
-						const count = stepRetryCount[currentStep];
-						if(!count) {
-							throw new Error('Retry count is undefined');
-						}
-                        if (count > err.maxRetries) {
-                            await executeRollbacks(job, jobProxy, token, processorConfig);
-                            throw new Error(
-                                `Max retries (${err.maxRetries}) reached for "${String(currentStep)}" on job ${job.id}`,
-                            );
-                        }
-                        retrying = true;
-                        currentStep = err.step as StepNames;
-                        jobData.step = currentStep;
-                        await job.updateData({
-                            ...jobData,
-                            ...(err.currentData ?? {}),
-                        });
-                        return undefined;
-                    }
 					if(!token){
 						throw new Error('Missing token for next step');
 					}
@@ -299,9 +271,6 @@ export function StepProcessor<TInput, TResult>(
 
             if (earlyExit) {
                 return result as TResult;
-            }
-            if (retrying) {
-                continue;
             }
             if (
                 result &&
