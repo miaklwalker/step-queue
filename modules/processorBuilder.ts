@@ -56,13 +56,41 @@ type ChildStepData<
 	[K in `${TName}-results`]: TChildResult;
 };
 
-export type PlainStep<TInput, TStepOutput, TErrors extends ErrorRegistry> = {
+/**
+ * The job data visible inside `rollback`: exactly the keys the step requested
+ * via `rollbackKeys`, nothing else. With no `rollbackKeys` the rollback gets
+ * an empty data object — a rollback must explicitly request what it needs.
+ * Requested keys are protected from `clean` in this and all later steps, so
+ * they are guaranteed to still exist when the rollback runs.
+ */
+type RollbackData<TAll, TKeys extends readonly PropertyKey[]> = Pick<
+	TAll,
+	Extract<TKeys[number], keyof TAll>
+>;
+
+export type PlainStep<
+	TInput,
+	TStepOutput,
+	TRollbackKeys extends readonly PropertyKey[],
+	TErrors extends ErrorRegistry,
+> = {
 	handler: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
 		token: string,
 	) => TStepOutput | Promise<TStepOutput>;
+	/**
+	 * The keys of the job data this step's `rollback` needs. Rollback receives
+	 * ONLY these keys (none by default), and they become ineligible for `clean`
+	 * in this and all later steps, so they still exist if the rollback runs.
+	 */
+	rollbackKeys?: TRollbackKeys & readonly (keyof (TInput & TStepOutput))[];
 	rollback?: (
-		job: TypedJob<Prettify<MergeOutput<TInput, TStepOutput>>, TErrors>,
+		job: TypedJob<
+			Prettify<
+				RollbackData<MergeOutput<TInput, TStepOutput>, TRollbackKeys>
+			>,
+			TErrors
+		>,
 		token: string,
 	) => void | Promise<void>;
 } & RegularBase<Prettify<TInput>, TErrors>;
@@ -74,6 +102,7 @@ export type ChildStep<
 	TChildQueue extends AnyChildQueue,
 	TSingle extends boolean,
 	TChildResult,
+	TRollbackKeys extends readonly PropertyKey[],
 	TErrors extends ErrorRegistry,
 > = {
 	name: TName;
@@ -89,9 +118,22 @@ export type ChildStep<
 	processChildResult?: (
 		results: ChildResults<TChildQueue, TSingle>,
 	) => TChildResult | Promise<TChildResult>;
+	/**
+	 * The keys of the job data this step's `rollback` needs. Rollback receives
+	 * ONLY these keys (none by default), and they become ineligible for `clean`
+	 * in this and all later steps, so they still exist if the rollback runs.
+	 */
+	rollbackKeys?: TRollbackKeys &
+		readonly (keyof (TInput &
+			TStepOutput & { [K in `${TName}-results`]: TChildResult }))[];
 	rollback?: (
 		job: TypedJob<
-			Prettify<ChildStepData<TName, TInput, TStepOutput, TChildResult>>,
+			Prettify<
+				RollbackData<
+					ChildStepData<TName, TInput, TStepOutput, TChildResult>,
+					TRollbackKeys
+				>
+			>,
 			TErrors
 		>,
 		token: string,
@@ -107,18 +149,23 @@ export type ChildStep<
 /**
  * Optional `clean` field: type-safe keys to drop from the job data once the
  * step finishes. Keys are validated against the step's INPUT data — the same
- * type `job.data` has inside the handler. That type is fully resolved before
- * `addStep` is called, so `clean` never interacts with handler inference.
- * `TClean` captures the literal tuple (for the return-type Omit); the value
- * type validates element-wise — a valid key checks against itself, an invalid
- * one is expected to be `keyof TData` — so only the offending string is
- * underlined, and the editor autocompletes the current keys.
+ * type `job.data` has inside the handler — minus any keys earlier steps
+ * reserved via `rollbackKeys` (TProtected). Both types are fully resolved
+ * before `addStep` is called, so `clean` never interacts with handler
+ * inference. `TClean` captures the literal tuple (for the return-type Omit);
+ * the value type validates element-wise — a valid key checks against itself,
+ * an invalid one is expected to be the valid-key union — so only the
+ * offending string is underlined, and the editor autocompletes the keys.
  */
-type CleanField<TData, TClean extends readonly PropertyKey[]> = {
+type CleanField<
+	TData,
+	TProtected extends PropertyKey,
+	TClean extends readonly PropertyKey[],
+> = {
 	clean?: {
-		[I in keyof TClean]: TClean[I] extends keyof TData
+		[I in keyof TClean]: TClean[I] extends Exclude<keyof TData, TProtected>
 			? TClean[I]
-			: keyof TData;
+			: Exclude<keyof TData, TProtected>;
 	};
 };
 
@@ -138,11 +185,13 @@ export class ProcessorBuilder<
 	TCurrentData,
 	TLastReturnType,
 	TErrors extends ErrorRegistry = Record<PropertyKey, string>,
+	TProtected extends PropertyKey = never,
 > {
 	constructor(
 		private readonly _steps: Record<string, StepConfig>,
 		private readonly _stepOrder: string[],
 		private readonly _errors: TErrors,
+		private readonly _protectedKeys: readonly string[] = [],
 	) {}
 
 	static init<TInitialData>() {
@@ -156,8 +205,19 @@ export class ProcessorBuilder<
 
 	errors<const E extends ErrorRegistry>(
 		registry: E,
-	): ProcessorBuilder<TInitialData, TCurrentData, TLastReturnType, E> {
-		return new ProcessorBuilder(this._steps, this._stepOrder, registry);
+	): ProcessorBuilder<
+		TInitialData,
+		TCurrentData,
+		TLastReturnType,
+		E,
+		TProtected
+	> {
+		return new ProcessorBuilder(
+			this._steps,
+			this._stepOrder,
+			registry,
+			this._protectedKeys,
+		);
 	}
 
 	private _push(config: StepConfig) {
@@ -168,6 +228,20 @@ export class ProcessorBuilder<
 			throw new AddStepError(`Duplicate step name: ${stepName}`);
 		}
 
+		// Keys reserved by rollbackKeys (this step's or an earlier step's) must
+		// survive until a potential rollback, so they can never be cleaned.
+		const rollbackKeys = config.rollbackKeys ?? [];
+		const conflicts = (config.clean ?? []).filter(
+			(key) =>
+				this._protectedKeys.includes(key) || rollbackKeys.includes(key),
+		);
+		if (conflicts.length > 0) {
+			throw new AddStepError(
+				`Step "${stepName}" cannot clean key(s) ${conflicts.join(", ")}: they are reserved by rollbackKeys`,
+			);
+		}
+		const protectedKeys = [...this._protectedKeys, ...rollbackKeys];
+
 		const previousStep = this._stepOrder[this._stepOrder.length - 1];
 
 		if (!previousStep) {
@@ -177,7 +251,12 @@ export class ProcessorBuilder<
 				);
 			}
 			clonedSteps[stepName] = config;
-			return new ProcessorBuilder(clonedSteps, [stepName], this._errors);
+			return new ProcessorBuilder(
+				clonedSteps,
+				[stepName],
+				this._errors,
+				protectedKeys,
+			);
 		}
 		const previousStepConfig = clonedSteps[previousStep];
 		if (!previousStepConfig) {
@@ -201,6 +280,7 @@ export class ProcessorBuilder<
 			clonedSteps,
 			[...this._stepOrder, stepName],
 			this._errors,
+			protectedKeys,
 		);
 	}
 
@@ -215,12 +295,15 @@ export class ProcessorBuilder<
 	//  - processChildResult or not → TChildResult is inferred from the callback
 	//    when present, otherwise defaults to the raw child result(s)
 	//  - `clean` keys              → TClean, optional on every variant
+	//  - `rollbackKeys`            → TRollbackKeys; narrows rollback's data and
+	//    joins TProtected so later steps cannot clean those keys
 	addStep<
 		TName extends string,
 		TStepOutput,
 		TChildQueue extends AnyChildQueue,
 		TSingle extends boolean = false,
 		TChildResult = ChildResults<TChildQueue, TSingle>,
+		const TRollbackKeys extends readonly PropertyKey[] = readonly [],
 		const TClean extends readonly PropertyKey[] = readonly [],
 	>(
 		stepConfig: ChildStep<
@@ -230,9 +313,10 @@ export class ProcessorBuilder<
 			TChildQueue,
 			TSingle,
 			TChildResult,
+			TRollbackKeys,
 			TErrors
 		> &
-			CleanField<TLastReturnType, TClean>,
+			CleanField<TLastReturnType, TProtected, TClean>,
 	): ProcessorBuilder<
 		TInitialData,
 		TCurrentData,
@@ -240,7 +324,8 @@ export class ProcessorBuilder<
 			ChildStepData<TName, TLastReturnType, TStepOutput, TChildResult>,
 			TClean[number]
 		>,
-		TErrors
+		TErrors,
+		TProtected | TRollbackKeys[number]
 	>;
 
 	// [plain step]
@@ -248,15 +333,22 @@ export class ProcessorBuilder<
 	// data; `clean` drops keys afterwards.
 	addStep<
 		TStepOutput,
+		const TRollbackKeys extends readonly PropertyKey[] = readonly [],
 		const TClean extends readonly PropertyKey[] = readonly [],
 	>(
-		stepConfig: PlainStep<TLastReturnType, TStepOutput, TErrors> &
-			CleanField<TLastReturnType, TClean>,
+		stepConfig: PlainStep<
+			TLastReturnType,
+			TStepOutput,
+			TRollbackKeys,
+			TErrors
+		> &
+			CleanField<TLastReturnType, TProtected, TClean>,
 	): ProcessorBuilder<
 		TInitialData,
 		TCurrentData,
 		Cleaned<MergeOutput<TLastReturnType, TStepOutput>, TClean[number]>,
-		TErrors
+		TErrors,
+		TProtected | TRollbackKeys[number]
 	>;
 
 

@@ -95,7 +95,21 @@ async function executeRollbacks(
 		const stepName = completedSteps[i];
 		const stepConfig = config.steps[stepName];
 		if (stepConfig?.rollback) {
-			await stepConfig.rollback(jobProxy, token);
+			// A rollback only sees the keys it requested via rollbackKeys —
+			// with none requested, its data is empty. Matches the static type.
+			const data = (job.data ?? {}) as Record<string, unknown>;
+			const picked: Record<string, unknown> = {};
+			for (const key of stepConfig.rollbackKeys ?? []) {
+				if (key in data) {
+					picked[key] = data[key];
+				}
+			}
+			const rollbackProxy = new Proxy(jobProxy, {
+				get(target, prop) {
+					return prop === "data" ? picked : target[prop];
+				},
+			});
+			await stepConfig.rollback(rollbackProxy, token);
 			await job.log(`${STEP_PROCESSOR_HEADER()} Rolled back step: ${stepName}`);
 		}
 	}

@@ -5,17 +5,35 @@ type VoidSafe<T> = T extends void ? Record<never, never> : T;
 
 /**
  * The shape of a standalone (reusable) step.
- * TRequired - the minimum job data this step needs to run.
- * TOutput   - what this step adds to the job data (void if it adds nothing).
+ * TRequired     - the minimum job data this step needs to run.
+ * TOutput       - what this step adds to the job data (void if it adds nothing).
+ * TRollbackKeys - the keys the rollback requested; its job data is exactly
+ *                 these (empty when none are declared), same as inline steps.
  */
-export type StandaloneStep<TRequired, TOutput = void> = {
+export type StandaloneStep<
+	TRequired,
+	TOutput = void,
+	TRollbackKeys extends readonly PropertyKey[] = readonly [],
+> = {
 	name: string;
 	handler: (
 		job: TypedJob<TRequired>,
 		token: string,
 	) => TOutput | Promise<TOutput>;
+	rollbackKeys?: TRollbackKeys &
+		readonly (keyof (TRequired & VoidSafe<TOutput>))[];
 	rollback?: (
-		job: TypedJob<Prettify<TRequired & VoidSafe<TOutput>>>,
+		job: TypedJob<
+			Prettify<
+				Pick<
+					TRequired & VoidSafe<TOutput>,
+					Extract<
+						TRollbackKeys[number],
+						keyof (TRequired & VoidSafe<TOutput>)
+					>
+				>
+			>
+		>,
 		token: string,
 	) => void | Promise<void>;
 	progressReport?: (
@@ -46,9 +64,12 @@ export type StandaloneStep<TRequired, TOutput = void> = {
  * the step's TRequired before it can be used — same as a regular step.
  */
 export function defineStep<TRequired = {}>() {
-	return <TOutput = void>(
-		config: StandaloneStep<TRequired, TOutput>,
-	): StandaloneStep<TRequired, TOutput> => config;
+	return <
+		TOutput = void,
+		const TRollbackKeys extends readonly PropertyKey[] = readonly [],
+	>(
+		config: StandaloneStep<TRequired, TOutput, TRollbackKeys>,
+	): StandaloneStep<TRequired, TOutput, TRollbackKeys> => config;
 }
 
 /**

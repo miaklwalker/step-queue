@@ -40,6 +40,11 @@ export type StepConfig = {
 	hasChildren: boolean;
 	/** Keys to delete from the job data once this step finishes. */
 	clean?: readonly string[];
+	/**
+	 * The only keys of the job data exposed to this step's rollback. Reserved:
+	 * neither this step nor any later step may list them in `clean`.
+	 */
+	rollbackKeys?: readonly string[];
 	rollback?: (job: any, token: string) => Promise<void>;
 	handler: (job: any, token: string) => Promise<any>;
 	progressReport?: (
