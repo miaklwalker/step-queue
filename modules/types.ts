@@ -1,2 +1,122 @@
-export type JSONLike = Record<string, unknown> | Array<unknown>;
-export type Processor<TInput, TOutput, TName> = {};
+import type { Job } from "bullmq";
+import type { QueueSystem } from "./queueSystem.ts";
+
+/** Flattens an intersection into a single, readable object type. */
+export type Prettify<T> = { [K in keyof T]: T[K] } & {};
+
+/** The shape of job data flowing through a processor. */
+export type JSONLike = Record<string, unknown>;
+
+/** A user-defined registry mapping error codes to messages. */
+export type ErrorRegistry = Record<string, string>;
+
+export type ProgressStatus = "start" | "finish" | "skip" | "child-finish";
+
+/**
+ * Remove `TKeys` from `TData` and flatten the result.
+ * Used by the `clean` step feature to drop keys from the job data type
+ * once a step declares it no longer needs them.
+ */
+export type Cleaned<TData, TKeys extends PropertyKey> = Prettify<
+	Omit<TData, TKeys>
+>;
+
+/**
+ * Internal bookkeeping keys the processor writes onto the job data.
+ * They are stripped from the result of an implicit final step.
+ */
+export const INTERNAL_KEYS = [
+	"step",
+	"previousStep",
+	"consumedKeys",
+	"completedSteps",
+] as const;
+
+export type StepConfig = {
+	name: string;
+	type: "regular" | "final";
+	nextStep?: string | null;
+	hasNextStep: boolean;
+	hasChildren: boolean;
+	/** Keys to delete from the job data once this step finishes. */
+	clean?: readonly string[];
+	rollback?: (job: any, token: string) => Promise<void>;
+	handler: (job: any, token: string) => Promise<any>;
+	progressReport?: (
+		job: any,
+		token: string,
+		stepName: string,
+		status: ProgressStatus,
+	) => Promise<void>;
+	childQueue?: QueueSystem<any, any, any>;
+	singleChild?: boolean;
+	processChildResult?: (results: any) => any;
+};
+
+export class AddStepError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "AddStepError";
+	}
+}
+export class ProcessorStepError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "ProcessorStepError";
+	}
+}
+
+export class SkipStepError extends Error {
+	constructor(
+		public readonly targetStep: string | null = null,
+		public readonly result: Record<string, any> = {},
+	) {
+		super(`SkipStep:${targetStep ?? "final"}`);
+		this.name = "SkipStepError";
+	}
+}
+export class SkipToFinalError extends Error {
+	constructor(
+		public readonly targetStep: string | null = null,
+		public readonly result: Record<string, any> = {},
+	) {
+		super(`SkipStep:${targetStep ?? "final"}`);
+		this.name = "SkipStepError";
+	}
+}
+
+export class EarlyExitError extends Error {
+	constructor(public readonly returnValue: any = {}) {
+		super("EarlyExit");
+		this.name = "EarlyExitError";
+	}
+}
+
+export class RetryStepError extends Error {
+	constructor(
+		public readonly step: string,
+		public readonly currentData?: any,
+		public readonly maxRetries: number = 3,
+	) {
+		super(`RetryStep:${step}`);
+		this.name = "RetryStepError";
+	}
+}
+export const actionErrors = {
+	skip: SkipStepError,
+	earlyExit: EarlyExitError,
+	retry: RetryStepError,
+	skipToFinal: SkipToFinalError,
+};
+
+export type TypedJob<TData, TErrors extends ErrorRegistry = {}> = Omit<
+	Job,
+	"data"
+> & {
+	readonly data: TData;
+	readonly errors: { readonly [K in keyof TErrors]: ProcessorStepError };
+	readonly actionErrors: {
+		readonly [K in keyof typeof actionErrors]: (typeof actionErrors)[K];
+	};
+	updateStepProgress: (data: Record<string, unknown>) => Promise<void>;
+};

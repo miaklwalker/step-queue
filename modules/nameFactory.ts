@@ -70,5 +70,5 @@ export function NameFactory({
 	return {
 		name: `${prefix}${name}`,
 		displayName: name,
-	} as any;
+	};
 }
