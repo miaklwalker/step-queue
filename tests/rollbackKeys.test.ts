@@ -124,9 +124,7 @@ describe("rollbackKeys (type-level and build-time)", () => {
 			handler: async () => ({ resourceId: "r1" }),
 			rollbackKeys: ["resourceId"],
 			rollback: async (job) => {
-				type _picked = Expect<
-					Equal<typeof job.data, { resourceId: string }>
-				>;
+				type _picked = Expect<Equal<typeof job.data, { resourceId: string }>>;
 				assert.ok(true as _picked);
 			},
 		});

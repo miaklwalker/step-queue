@@ -2,13 +2,14 @@ import assert from "node:assert";
 import test, { after, before, describe } from "node:test";
 import { z } from "zod";
 import { NameFactory } from "../modules/nameFactory.ts";
-import { QueueSystem, type QueueOutput } from "../modules/queueSystem.ts";
+import { ProcessorBuilder } from "../modules/processorBuilder.ts";
+import { type QueueOutput, QueueSystem } from "../modules/queueSystem.ts";
 import {
 	closeAll,
 	connection,
-	ensureRedis,
 	type Equal,
 	type Expect,
+	ensureRedis,
 	runToCompletion,
 	track,
 	uniqueName,
@@ -41,6 +42,20 @@ describe("QueueSystem builder (no connection needed)", () => {
 			() =>
 				q.defineProcessor((step) =>
 					step.addStep({ name: "s", handler: async () => ({}) }),
+				),
+			/defineConnection/,
+		);
+	});
+
+	test("defineProcessor accepts a ProcessorBuilder but still requires a connection", () => {
+		const q = new QueueSystem(NameFactory({ name: "Q" }));
+		assert.throws(
+			() =>
+				q.defineProcessor(
+					ProcessorBuilder.init<{ greeting: string }>().addStep({
+						name: "s",
+						handler: async () => ({}),
+					}),
 				),
 			/defineConnection/,
 		);
@@ -79,9 +94,34 @@ describe("QueueSystem (end-to-end via BullMQ)", () => {
 
 		type Out = QueueOutput<typeof queue>;
 		type _ = Expect<Equal<Out, { done: string }>>;
-
 		const out = await runToCompletion(queue, { greeting: "hi" });
 		assert.deepStrictEqual(out, { done: "HI" });
+	});
+
+	test("processes a job defined via a standalone ProcessorBuilder", async () => {
+		const queue = track(
+			new QueueSystem(NameFactory({ name: uniqueName("builder"), env: "test" }))
+				.defineConnection(connection)
+				.defineProcessor(
+					ProcessorBuilder.init<{ greeting: string }>()
+						.addStep({
+							name: "shout",
+							handler: async (job) => ({
+								shout: job.data.greeting.toUpperCase(),
+							}),
+						})
+						.addFinalStep({
+							handler: async (job) => ({ done: job.data.shout }),
+						}),
+				),
+		);
+
+		// Input AND output types are inferred from the builder.
+		type Out = QueueOutput<typeof queue>;
+		type _ = Expect<Equal<Out, { done: string }>>;
+
+		const out = await runToCompletion(queue, { greeting: "hey" });
+		assert.deepStrictEqual(out, { done: "HEY" });
 	});
 
 	test("validates job input against the schema at enqueue time", async () => {

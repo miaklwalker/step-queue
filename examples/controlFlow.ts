@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { NameFactory, QueueSystem } from "../modules/index.ts";
+import { NameFactory, QueueSystem } from "../modules";
 import { connection } from "../tests/support.ts";
 
 const attempts = new Map<string, number>();
@@ -66,16 +66,16 @@ const signup = new QueueSystem(NameFactory({ name: "signup", env: "example" }))
 				}),
 			}),
 	);
-
-async function run(input: { email: string; optOutOfEmail: boolean }) {
-	const job = await signup.addJob(input);
-	const result = await job.waitUntilFinished(signup.QueueEvents, 10_000);
-	console.log(`${input.email} ->`, result);
-}
-
-await run({ email: "not-an-email", optOutOfEmail: false }); // earlyExit
-await run({ email: "ada@example.com", optOutOfEmail: false }); // retry, full path
-await run({ email: "grace@example.com", optOutOfEmail: true }); // skip grantTrial
-
-await signup.close();
-process.exit(0);
+signup.addToSystem("Examples");
+// async function run(input: { email: string; optOutOfEmail: boolean }) {
+// 	const job = await signup.addJob(input);
+// 	const result = await job.waitUntilFinished(signup.QueueEvents, 10_000);
+// 	console.log(`${input.email} ->`, result);
+// }
+//
+// await run({ email: "not-an-email", optOutOfEmail: false }); // earlyExit
+// await run({ email: "ada@example.com", optOutOfEmail: false }); // retry, full path
+// await run({ email: "grace@example.com", optOutOfEmail: true }); // skip grantTrial
+//
+// await signup.close();
+// process.exit(0);

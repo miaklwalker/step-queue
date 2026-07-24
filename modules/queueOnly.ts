@@ -120,6 +120,8 @@ export class QueueOnly<
 }
 
 export type QueueOnlyInput<T> =
+// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 	T extends QueueOnly<infer I, any, any> ? I : never;
 export type QueueOnlyOutput<T> =
+// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 	T extends QueueOnly<any, infer O, any> ? O : never;

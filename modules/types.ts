@@ -45,11 +45,14 @@ export type StepConfig = {
 	 * neither this step nor any later step may list them in `clean`.
 	 */
 	rollbackKeys?: readonly string[];
-	rollback?: (job: any, token: string) => Promise<void>;
-	handler: (job: any, token: string) => Promise<any>;
+	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
+	rollback?: (job: any, token: Job['token']) => Promise<void>;
+	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
+	handler: (job: any, token: Job['token']) => Promise<any>;
 	progressReport?: (
+	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 		job: any,
-		token: string,
+		token: Job['token'],
 		stepName: string,
 		status: ProgressStatus,
 	) => Promise<void>;
@@ -74,6 +77,7 @@ export class ProcessorStepError extends Error {
 export class SkipStepError extends Error {
 	constructor(
 		public readonly targetStep: string | null = null,
+		// biome-ignore lint/suspicious/noExplicitAny: <todo: fix this one>
 		public readonly result: Record<string, any> = {},
 	) {
 		super(`SkipStep:${targetStep ?? "final"}`);
@@ -83,6 +87,7 @@ export class SkipStepError extends Error {
 export class SkipToFinalError extends Error {
 	constructor(
 		public readonly targetStep: string | null = null,
+		// biome-ignore lint/suspicious/noExplicitAny: <todo: fix this one>
 		public readonly result: Record<string, any> = {},
 	) {
 		super(`SkipStep:${targetStep ?? "final"}`);
@@ -100,6 +105,7 @@ export class EarlyExitError extends Error {
 export class RetryStepError extends Error {
 	constructor(
 		public readonly step: string,
+		// biome-ignore lint/suspicious/noExplicitAny: <todo: fix this one>
 		public readonly currentData?: any,
 		public readonly maxRetries: number = 3,
 	) {

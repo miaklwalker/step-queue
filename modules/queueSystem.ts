@@ -1,23 +1,21 @@
 import {
+	type ConnectionOptions,
 	type Job,
 	type JobsOptions,
+	MetricsTime,
 	type Processor,
 	Queue,
+	QueueEvents,
 	Worker,
 	type WorkerListener,
-	QueueEvents,
-	MetricsTime,
-	type ConnectionOptions,
 } from "bullmq";
-import { z, type ZodType } from "zod";
-import type { JSONLike, TypedJob, ErrorRegistry } from "./types.ts";
-import { ProcessorBuilder } from "./processorBuilder.ts";
+import { type ZodType, z } from "zod";
 import { DEFAULT_JOB_OPTIONS } from "./const.ts";
+import { ProcessorBuilder } from "./processorBuilder.ts";
+import type { ErrorRegistry, JSONLike, TypedJob } from "./types.ts";
 
 /**
  * A fully type-safe, step-based wrapper around a BullMQ queue + worker.
- *
- * Build one fluently:
  *
  * ```ts
  * const myInput = z.object({ greeting: z.string() });
@@ -25,8 +23,8 @@ import { DEFAULT_JOB_OPTIONS } from "./const.ts";
  * const myQueue = new QueueSystem(NameFactory({ name: "MyCoolQueue", env: "dev" }))
  *   .defineInputSchema(myInput)
  *   .defineConnection({ host: "localhost", port: 6379 })
- *   .defineProcessor((step) =>
- *     step
+ *   .defineProcessor((processor) =>
+ *     processor
  *       .addStep({
  *         name: "greet",
  *         handler: async (job) => ({ shout: job.data.greeting.toUpperCase() }),
@@ -36,7 +34,7 @@ import { DEFAULT_JOB_OPTIONS } from "./const.ts";
  * ```
  *
  * `defineProcessor` receives a `ProcessorBuilder` already typed with the input
- * schema — no `.init<T>()` and no trailing `.build()` needed. If you omit
+ * schema — no `.init<T>()`. If you omit
  * `addFinalStep`, one is inserted for you that returns the accumulated job data.
  */
 export class QueueSystem<
@@ -104,18 +102,39 @@ export class QueueSystem<
 	 * Define the processing steps and start the worker. Must be called after
 	 * `defineConnection`. Returns the runnable queue, typed with the output of
 	 * the final step.
+	 *
+	 * Accepts either a callback that receives a `ProcessorBuilder` already typed
+	 * with the input schema, or a `ProcessorBuilder` you constructed yourself via
+	 * `ProcessorBuilder.init<TInput>()`. Do not call `.build()` — `defineProcessor`
+	 * builds the processor for you in both forms.
 	 */
 	defineProcessor<TNewOutput extends JSONLike>(
 		build: (
 			builder: ProcessorBuilder<TInput, TInput, TInput>,
 		) => ProcessorBuilder<TInput, TInput, TNewOutput, ErrorRegistry>,
+	): QueueSystem<TInput, TNewOutput, TName>;
+
+	defineProcessor<TNewInput extends TInput, TNewOutput extends JSONLike>(
+		builder: ProcessorBuilder<TNewInput, TNewInput, TNewOutput, ErrorRegistry>,
+	): QueueSystem<TNewInput, TNewOutput, TName>;
+
+	defineProcessor<TNewOutput extends JSONLike>(
+		builderOrBuild:
+			| ProcessorBuilder<TInput, TInput, TNewOutput, ErrorRegistry>
+			| ((
+					builder: ProcessorBuilder<TInput, TInput, TInput>,
+			  ) => ProcessorBuilder<TInput, TInput, TNewOutput, ErrorRegistry>),
 	): QueueSystem<TInput, TNewOutput, TName> {
 		if (!this._connection) {
 			throw new Error(
 				"defineConnection(...) must be called before defineProcessor(...)",
 			);
 		}
-		const processor = build(ProcessorBuilder.init<TInput>()).build();
+		const builder =
+			builderOrBuild instanceof ProcessorBuilder
+				? builderOrBuild
+				: builderOrBuild(ProcessorBuilder.init<TInput>());
+		const processor = builder.build();
 
 		this.queue = new Queue<TInput, TOutput, TName, TInput, TOutput, TName>(
 			this.name,
@@ -197,7 +216,8 @@ export class QueueSystem<
 		parentJob: Job | TypedJob<JSONLike, ErrorRegistry>,
 		jobs: Array<{ data: TInput; opts?: JobsOptions }>,
 	) {
-		if (!parentJob.id || !parentJob.queueQualifiedName) {
+		const parentId = parentJob.id;
+		if (!parentId || !parentJob.queueQualifiedName) {
 			throw new Error(
 				"Parent job must have an id and a queueQualifiedName to add child jobs",
 			);
@@ -208,7 +228,7 @@ export class QueueSystem<
 				opts: {
 					...job?.opts,
 					parent: {
-						id: parentJob.id!,
+						id: parentId,
 						queue: parentJob.queueQualifiedName,
 					},
 				},
@@ -259,6 +279,8 @@ export class QueueSystem<
 }
 
 export type QueueInput<T> =
+// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 	T extends QueueSystem<infer I, any, any> ? I : never;
 export type QueueOutput<T> =
+	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 	T extends QueueSystem<any, infer O, any> ? O : never;

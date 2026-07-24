@@ -1,23 +1,23 @@
-import type { QueueOutput, QueueSystem } from "./queueSystem.ts";
+import type {Job} from "bullmq";
+import type {QueueOutput, QueueSystem} from "./queueSystem.ts";
+import {StepProcessor} from "./stepProcessor.ts";
 import {
 	AddStepError,
 	type Cleaned,
 	type ErrorRegistry,
 	INTERNAL_KEYS,
-	type JSONLike,
 	type Prettify,
 	type ProgressStatus,
 	type StepConfig,
 	type TypedJob,
 } from "./types.ts";
-import { StepProcessor } from "./stepProcessor.ts";
 
 export type RegularBase<TInput, TErrors extends ErrorRegistry> = {
 	name: string;
 	hasChildren?: boolean;
 	progressReport?: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
-		token: string,
+		token: Job['token'],
 		stepName: string,
 		status: ProgressStatus,
 	) => void | Promise<void>;
@@ -28,7 +28,9 @@ export type RegularBase<TInput, TErrors extends ErrorRegistry> = {
  * void). Rather than one overload per case, `TStepOutput` is inferred from the
  * handler and merged conditionally: void-ish returns leave the data unchanged.
  */
-type MergeOutput<TInput, TOutput> = [TOutput] extends [void | undefined]
+
+// biome-ignore lint/suspicious/noConfusingVoidType: <Users can return undefined or not return at all.>
+type  MergeOutput<TInput, TOutput> = [TOutput] extends [void | undefined]
 	? TInput
 	: TInput & TOutput;
 
@@ -41,10 +43,9 @@ export type AnyChildQueue = QueueSystem<any, any, any>;
  * `processChildResult` is given: one child's output when `singleChild: true`,
  * otherwise the array of all child outputs.
  */
-type ChildResults<
-	TChildQueue,
-	TSingle extends boolean,
-> = TSingle extends true ? QueueOutput<TChildQueue> : QueueOutput<TChildQueue>[];
+type ChildResults<TChildQueue, TSingle extends boolean> = TSingle extends true
+	? QueueOutput<TChildQueue>
+	: QueueOutput<TChildQueue>[];
 
 /** Job data after a child step: handler output merged in, plus `<name>-results`. */
 type ChildStepData<
@@ -57,9 +58,8 @@ type ChildStepData<
 };
 
 /**
- * The job data visible inside `rollback`: exactly the keys the step requested
- * via `rollbackKeys`, nothing else. With no `rollbackKeys` the rollback gets
- * an empty data object — a rollback must explicitly request what it needs.
+ * The job data visible inside `rollback` via `rollbackKeys`,
+ * With no `rollbackKeys` the rollback gets an empty data object — a rollback must explicitly request what it needs.
  * Requested keys are protected from `clean` in this and all later steps, so
  * they are guaranteed to still exist when the rollback runs.
  */
@@ -76,7 +76,7 @@ export type PlainStep<
 > = {
 	handler: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
-		token: string,
+		token: Job['token'],
 	) => TStepOutput | Promise<TStepOutput>;
 	/**
 	 * The keys of the job data this step's `rollback` needs. Rollback receives
@@ -86,12 +86,10 @@ export type PlainStep<
 	rollbackKeys?: TRollbackKeys & readonly (keyof (TInput & TStepOutput))[];
 	rollback?: (
 		job: TypedJob<
-			Prettify<
-				RollbackData<MergeOutput<TInput, TStepOutput>, TRollbackKeys>
-			>,
+			Prettify<RollbackData<MergeOutput<TInput, TStepOutput>, TRollbackKeys>>,
 			TErrors
 		>,
-		token: string,
+		token: Job['token'],
 	) => void | Promise<void>;
 } & RegularBase<Prettify<TInput>, TErrors>;
 
@@ -108,7 +106,7 @@ export type ChildStep<
 	name: TName;
 	handler: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
-		token: string,
+		token: Job['token'],
 	) => TStepOutput | Promise<TStepOutput>;
 	childQueue: TChildQueue;
 	hasChildren?: true;
@@ -136,11 +134,11 @@ export type ChildStep<
 			>,
 			TErrors
 		>,
-		token: string,
+		token: Job['token'],
 	) => void | Promise<void>;
 	progressReport?: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
-		token: string,
+		token: Job['token'],
 		stepName: string,
 		status: ProgressStatus,
 	) => void | Promise<void>;
@@ -174,7 +172,7 @@ type CleanField<
 export type FinalStep<TInput, TOutput, TErrors extends ErrorRegistry> = {
 	handler: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
-		token: string,
+		token: Job['token'],
 	) => TOutput | Promise<TOutput>;
 };
 
@@ -232,8 +230,7 @@ export class ProcessorBuilder<
 		// survive until a potential rollback, so they can never be cleaned.
 		const rollbackKeys = config.rollbackKeys ?? [];
 		const conflicts = (config.clean ?? []).filter(
-			(key) =>
-				this._protectedKeys.includes(key) || rollbackKeys.includes(key),
+			(key) => this._protectedKeys.includes(key) || rollbackKeys.includes(key),
 		);
 		if (conflicts.length > 0) {
 			throw new AddStepError(
@@ -284,19 +281,13 @@ export class ProcessorBuilder<
 		);
 	}
 
-
 	// [child step]
-	// Has a `childQueue`. Every sub-variant is folded into this one signature
-	// instead of eight overloads:
-	//  - adds data vs adds nothing → TStepOutput inferred from the handler;
-	//    MergeOutput skips the merge when it returns void
-	//  - single vs many children   → TSingle inferred from `singleChild`
-	//    (defaults to false); ChildResults picks output vs output[]
-	//  - processChildResult or not → TChildResult is inferred from the callback
-	//    when present, otherwise defaults to the raw child result(s)
-	//  - `clean` keys              → TClean, optional on every variant
-	//  - `rollbackKeys`            → TRollbackKeys; narrows rollback's data and
-	//    joins TProtected so later steps cannot clean those keys
+	// Has a `childQueue`
+	// If you know there will only be one child job
+	// You may mark it as single child, this will tell the processor to return a single result
+	// Instead of a results array
+	// You may also define a processChildJob property
+	// This function will take the results from the child job and process them before proceeding to the next step
 	addStep<
 		TName extends string,
 		TStepOutput,
@@ -329,8 +320,8 @@ export class ProcessorBuilder<
 	>;
 
 	// [plain step]
-	// No child queue. The handler's return value (if any) is merged into the job
-	// data; `clean` drops keys afterwards.
+	// This step does not contain a child queue.
+	// Its return type is added to the job data and is visible in all future steps
 	addStep<
 		TStepOutput,
 		const TRollbackKeys extends readonly PropertyKey[] = readonly [],
@@ -351,7 +342,6 @@ export class ProcessorBuilder<
 		TProtected | TRollbackKeys[number]
 	>;
 
-
 	// biome-ignore lint/suspicious/noExplicitAny: <Overloaded add step will never it any condition>
 	addStep(stepConfig: any): any {
 		return this._push({
@@ -365,6 +355,7 @@ export class ProcessorBuilder<
 		stepConfig: FinalStep<TLastReturnType, TStepOutput, TErrors>,
 	): ProcessorBuilder<TInitialData, TCurrentData, TStepOutput, TErrors>;
 
+	// biome-ignore lint/suspicious/noExplicitAny: <The method is overloaded, and must accept any>
 	addFinalStep(stepConfig: any): any {
 		if (this._steps[FINAL_STEP_NAME]) {
 			throw new AddStepError(
