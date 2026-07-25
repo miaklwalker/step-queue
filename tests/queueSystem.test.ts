@@ -384,10 +384,7 @@ describe("processor action errors (control flow)", () => {
 				),
 		);
 
-		await assert.rejects(
-			() => runToCompletion(queue, { start: "go" }),
-			/boom/,
-		);
+		await assert.rejects(() => runToCompletion(queue, { start: "go" }), /boom/);
 		// "b" throws, so the final step never runs.
 		assert.deepStrictEqual(visited, ["a", "b"]);
 		// "a" completed, so its rollback fires with its requested keys.

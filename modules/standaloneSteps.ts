@@ -1,4 +1,4 @@
-import type {Job} from "bullmq";
+import type { Job } from "bullmq";
 import type { Prettify, ProgressStatus, TypedJob } from "./types.ts";
 
 // When TOutput is void, the rollback handler should only see TRequired (not merge with void).
@@ -19,7 +19,7 @@ export type StandaloneStep<
 	name: string;
 	handler: (
 		job: TypedJob<TRequired>,
-		token: Job['token'],
+		token: Job["token"],
 	) => TOutput | Promise<TOutput>;
 	rollbackKeys?: TRollbackKeys &
 		readonly (keyof (TRequired & VoidSafe<TOutput>))[];
@@ -32,11 +32,11 @@ export type StandaloneStep<
 				>
 			>
 		>,
-		token: Job['token'],
+		token: Job["token"],
 	) => void | Promise<void>;
 	progressReport?: (
 		job: TypedJob<TRequired>,
-		token: Job['token'],
+		token: Job["token"],
 		stepName: string,
 		status: ProgressStatus,
 	) => void | Promise<void>;
@@ -82,7 +82,7 @@ export function defineStep<TRequired>() {
  */
 export function defineSteps<
 	// biome-ignore lint/suspicious/noExplicitAny: <I believe any is correct here>
-		TSteps extends Record<string, StandaloneStep<any, any>>,
+	TSteps extends Record<string, StandaloneStep<any, any>>,
 >(steps: TSteps): TSteps {
 	return steps;
 }

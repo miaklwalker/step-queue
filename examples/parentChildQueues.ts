@@ -1,6 +1,6 @@
-import {z} from "zod";
-import {NameFactory, QueueSystem} from "../modules";
-import {connection} from "../tests/support.ts";
+import { z } from "zod";
+import { NameFactory, QueueSystem } from "../modules";
+import { connection } from "../tests/support.ts";
 
 const childInputSchema = z.object({ name: z.string() });
 const childQueue = new QueueSystem(
@@ -75,7 +75,7 @@ const parentQueue = new QueueSystem(NameFactory({ name: "parentQueue" }))
 				clean: ["joke", "y", "Test Children-results", "Test Child-results"],
 				handler: async (job) => {
 					const data = job.data;
-					await job.log(data.joke)
+					await job.log(data.joke);
 					return { z: 5 };
 				},
 			})
@@ -83,7 +83,7 @@ const parentQueue = new QueueSystem(NameFactory({ name: "parentQueue" }))
 				name: "another one",
 				handler: async (job) => {
 					const data = job.data;
-					await job.log(data["Test processed Child-results"].reallySillyName)
+					await job.log(data["Test processed Child-results"].reallySillyName);
 				},
 			}),
 	);

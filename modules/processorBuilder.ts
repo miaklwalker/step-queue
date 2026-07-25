@@ -1,6 +1,6 @@
-import type {Job} from "bullmq";
-import type {QueueOutput, QueueSystem} from "./queueSystem.ts";
-import {StepProcessor} from "./stepProcessor.ts";
+import type { Job } from "bullmq";
+import type { QueueOutput, QueueSystem } from "./queueSystem.ts";
+import { StepProcessor } from "./stepProcessor.ts";
 import {
 	AddStepError,
 	type Cleaned,
@@ -17,7 +17,7 @@ export type RegularBase<TInput, TErrors extends ErrorRegistry> = {
 	hasChildren?: boolean;
 	progressReport?: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
-		token: Job['token'],
+		token: Job["token"],
 		stepName: string,
 		status: ProgressStatus,
 	) => void | Promise<void>;
@@ -30,7 +30,7 @@ export type RegularBase<TInput, TErrors extends ErrorRegistry> = {
  */
 
 // biome-ignore lint/suspicious/noConfusingVoidType: <Users can return undefined or not return at all.>
-type  MergeOutput<TInput, TOutput> = [TOutput] extends [void | undefined]
+type MergeOutput<TInput, TOutput> = [TOutput] extends [void | undefined]
 	? TInput
 	: TInput & TOutput;
 
@@ -76,7 +76,7 @@ export type PlainStep<
 > = {
 	handler: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
-		token: Job['token'],
+		token: Job["token"],
 	) => TStepOutput | Promise<TStepOutput>;
 	/**
 	 * The keys of the job data this step's `rollback` needs. Rollback receives
@@ -89,7 +89,7 @@ export type PlainStep<
 			Prettify<RollbackData<MergeOutput<TInput, TStepOutput>, TRollbackKeys>>,
 			TErrors
 		>,
-		token: Job['token'],
+		token: Job["token"],
 	) => void | Promise<void>;
 } & RegularBase<Prettify<TInput>, TErrors>;
 
@@ -106,7 +106,7 @@ export type ChildStep<
 	name: TName;
 	handler: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
-		token: Job['token'],
+		token: Job["token"],
 	) => TStepOutput | Promise<TStepOutput>;
 	childQueue: TChildQueue;
 	hasChildren?: true;
@@ -134,11 +134,11 @@ export type ChildStep<
 			>,
 			TErrors
 		>,
-		token: Job['token'],
+		token: Job["token"],
 	) => void | Promise<void>;
 	progressReport?: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
-		token: Job['token'],
+		token: Job["token"],
 		stepName: string,
 		status: ProgressStatus,
 	) => void | Promise<void>;
@@ -172,7 +172,7 @@ type CleanField<
 export type FinalStep<TInput, TOutput, TErrors extends ErrorRegistry> = {
 	handler: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
-		token: Job['token'],
+		token: Job["token"],
 	) => TOutput | Promise<TOutput>;
 };
 

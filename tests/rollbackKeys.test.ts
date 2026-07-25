@@ -77,6 +77,7 @@ describe("rollbackKeys (type-level and build-time)", () => {
 			name: "s",
 			handler: async (job) => ({ made: job.data.a + 1 }),
 			rollback: async (job) => {
+				// biome-ignore lint/complexity/noBannedTypes: <This is for the test>
 				type _empty = Expect<Equal<typeof job.data, {}>>;
 				assert.ok(true as _empty);
 			},

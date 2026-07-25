@@ -7,7 +7,7 @@ import type { QueueSystem } from "../modules/index.ts";
  */
 export const connection: { host: string; port: number } = {
 	host: process.env.REDIS_HOST ?? "127.0.0.1",
-	port: process.env.REDIS_PORT ? Number(process.env.REDIS_PORT) : 55578,
+	port: process.env.REDIS_PORT ? Number(process.env.REDIS_PORT) : 60866,
 };
 
 let counter = 0;

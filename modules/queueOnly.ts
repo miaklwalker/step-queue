@@ -91,16 +91,23 @@ export class QueueOnly<
 			);
 		}
 		return await this.addBulkJobs(
-			jobs.map((job) => ({
-				data: job.data,
-				opts: {
-					...job?.opts,
-					parent: {
-						id: parentJob.id!,
-						queue: parentJob.queueQualifiedName,
+			jobs.map((job) => {
+				const parentId = parentJob.id;
+				if (!parentId) {
+					throw new Error("Parent ID is required");
+				}
+				parentId;
+				return {
+					data: job.data,
+					opts: {
+						...job?.opts,
+						parent: {
+							id: parentId,
+							queue: parentJob.queueQualifiedName,
+						},
 					},
-				},
-			})),
+				};
+			}),
 		);
 	}
 
@@ -120,8 +127,8 @@ export class QueueOnly<
 }
 
 export type QueueOnlyInput<T> =
-// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
+	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 	T extends QueueOnly<infer I, any, any> ? I : never;
 export type QueueOnlyOutput<T> =
-// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
+	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 	T extends QueueOnly<any, infer O, any> ? O : never;

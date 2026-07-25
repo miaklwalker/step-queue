@@ -57,8 +57,10 @@ export type StepConfig = {
 		stepName: string,
 		status: ProgressStatus,
 	) => Promise<void>;
+	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 	childQueue?: QueueSystem<any, any, any>;
 	singleChild?: boolean;
+	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 	processChildResult?: (results: any) => any;
 };
 
@@ -120,6 +122,7 @@ export class SkipToFinalError extends Error {
 }
 
 export class EarlyExitError extends Error {
+	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
 	constructor(public readonly returnValue: any = {}) {
 		super("EarlyExit");
 		this.name = "EarlyExitError";
@@ -132,10 +135,10 @@ export const actionErrors = {
 	skipToFinal: SkipToFinalError,
 };
 
-export type TypedJob<TData, TErrors extends ErrorRegistry = {}> = Omit<
-	Job,
-	"data"
-> & {
+export type TypedJob<
+	TData,
+	TErrors extends ErrorRegistry = Record<string, string>,
+> = Omit<Job, "data"> & {
 	readonly data: TData;
 	readonly errors: { readonly [K in keyof TErrors]: ProcessorStepError };
 	readonly actionErrors: {

@@ -1,63 +1,63 @@
 {
-  "name": "@michaelrwalker/step-queue",
-  "version": "0.0.2",
-  "description": "An extremely type-safe, step-based wrapper around BullMQ.",
-  "type": "module",
-  "main": "main.ts",
-  "types": "main.ts",
-  "exports": {
-    ".": "./main.ts"
-  },
-  "files": [
-    "modules",
-    "main.ts",
-    "README.md"
-  ],
-  "scripts": {
-    "test": "node --test --experimental-transform-types --disable-warning=ExperimentalWarning \"tests/**/*.test.ts\"",
-    "typecheck": "tsc --noEmit",
-    "format": "biome format --write",
-    "fix": "biome lint --write",
-    "release": "release-it"
-  },
-  "keywords": [
-    "bullmq",
-    "queue",
-    "typescript",
-    "jobs",
-    "steps",
-    "workflow"
-  ],
-  "peerDependencies": {
-    "bullmq": "^5.0.0"
-  },
-  "devDependencies": {
-    "@biomejs/biome": "2.5.5",
-    "@types/node": "^26.1.1",
-    "bullmq": "^5.81.0",
-    "release-it": "^20.2.1",
-    "typescript": "^5.9.3",
-    "zod": "^4.4.3"
-  },
-  "dependencies": {
-    "@standard-schema/spec": "^1.1.0"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "release-it": {
-    "$schema": "https://unpkg.com/release-it/schema/release-it.json",
-    "git": {
-      "commit": true,
-      "tag": true,
-      "push": true,
-      "commitMessage": "chore: release v${version}"
-    },
-    "github": {
-      "release": true
-    },
-    "npm": {
-      "publish": true
-    }
-  }
+	"name": "@michaelrwalker/step-queue",
+	"version": "0.0.2",
+	"description": "An extremely type-safe, step-based wrapper around BullMQ.",
+	"type": "module",
+	"main": "main.ts",
+	"types": "main.ts",
+	"exports": {
+		".": "./main.ts"
+	},
+	"files": [
+		"modules",
+		"main.ts",
+		"README.md"
+	],
+	"scripts": {
+		"test": "node --test --experimental-transform-types --disable-warning=ExperimentalWarning \"tests/**/*.test.ts\"",
+		"typecheck": "tsc --noEmit",
+		"format": "biome format --write",
+		"fix": "biome lint --write",
+		"release": "release-it"
+	},
+	"keywords": [
+		"bullmq",
+		"queue",
+		"typescript",
+		"jobs",
+		"steps",
+		"workflow"
+	],
+	"peerDependencies": {
+		"bullmq": "^5.0.0"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "2.5.5",
+		"@types/node": "^26.1.1",
+		"bullmq": "^5.81.0",
+		"release-it": "^20.2.1",
+		"typescript": "^5.9.3",
+		"zod": "^4.4.3"
+	},
+	"dependencies": {
+		"@standard-schema/spec": "^1.1.0"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"release-it": {
+		"$schema": "https://unpkg.com/release-it/schema/release-it.json",
+		"git": {
+			"commit": true,
+			"tag": true,
+			"push": true,
+			"commitMessage": "chore: release v${version}"
+		},
+		"github": {
+			"release": true
+		},
+		"npm": {
+			"publish": true
+		}
+	}
 }
