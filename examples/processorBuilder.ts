@@ -3,7 +3,8 @@ import { NameFactory, ProcessorBuilder, QueueSystem } from "../modules";
 const manualBuilder = new QueueSystem(
 	NameFactory({ name: "test" }),
 ).defineProcessor(
-	ProcessorBuilder.init<{ foo: string }>()
+	ProcessorBuilder
+		.init<{ foo: string }>()
 		.addStep({
 			name: "check",
 			handler: async (_job) => {

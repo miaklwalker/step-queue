@@ -34,7 +34,6 @@ type MergeOutput<TInput, TOutput> = [TOutput] extends [void | undefined]
 	? TInput
 	: TInput & TOutput;
 
-/** Any child queue, regardless of its own input/output/name types. */
 // biome-ignore lint/suspicious/noExplicitAny: matching a queue structurally; its generics are captured by TChildQueue itself
 export type AnyChildQueue = QueueSystem<any, any, any>;
 
@@ -77,7 +76,7 @@ export type PlainStep<
 	handler: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
 		token: Job["token"],
-	) => TStepOutput | Promise<TStepOutput>;
+	) => Promise<TStepOutput>;
 	/**
 	 * The keys of the job data this step's `rollback` needs. Rollback receives
 	 * ONLY these keys (none by default), and they become ineligible for `clean`
@@ -107,7 +106,7 @@ export type ChildStep<
 	handler: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
 		token: Job["token"],
-	) => TStepOutput | Promise<TStepOutput>;
+	) => Promise<TStepOutput>;
 	childQueue: TChildQueue;
 	hasChildren?: true;
 	/** `true` = exactly one child job; its output is stored unwrapped. */
@@ -173,7 +172,7 @@ export type FinalStep<TInput, TOutput, TErrors extends ErrorRegistry> = {
 	handler: (
 		job: TypedJob<Prettify<TInput>, TErrors>,
 		token: Job["token"],
-	) => TOutput | Promise<TOutput>;
+	) => Promise<TOutput>;
 };
 
 export const FINAL_STEP_NAME = "__final__step__";
@@ -355,8 +354,7 @@ export class ProcessorBuilder<
 		stepConfig: FinalStep<TLastReturnType, TStepOutput, TErrors>,
 	): ProcessorBuilder<TInitialData, TCurrentData, TStepOutput, TErrors>;
 
-	// biome-ignore lint/suspicious/noExplicitAny: <The method is overloaded, and must accept any>
-	addFinalStep(stepConfig: any): any {
+	addFinalStep(stepConfig: Pick<StepConfig, "handler">): unknown {
 		if (this._steps[FINAL_STEP_NAME]) {
 			throw new AddStepError(
 				"Step name __final__step__ is reserved for the final step and cannot be used as a regular step name",

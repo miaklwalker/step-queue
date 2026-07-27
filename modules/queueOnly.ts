@@ -96,7 +96,6 @@ export class QueueOnly<
 				if (!parentId) {
 					throw new Error("Parent ID is required");
 				}
-				parentId;
 				return {
 					data: job.data,
 					opts: {

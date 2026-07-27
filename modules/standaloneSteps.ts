@@ -20,7 +20,7 @@ export type StandaloneStep<
 	handler: (
 		job: TypedJob<TRequired>,
 		token: Job["token"],
-	) => TOutput | Promise<TOutput>;
+	) => Promise<TOutput>;
 	rollbackKeys?: TRollbackKeys &
 		readonly (keyof (TRequired & VoidSafe<TOutput>))[];
 	rollback?: (

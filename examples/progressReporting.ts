@@ -1,10 +1,7 @@
 import { z } from "zod";
 import { NameFactory, QueueSystem } from "../modules";
+import {connection} from "../tests/support.ts";
 
-const connection = {
-	host: process.env.REDIS_HOST ?? "127.0.0.1",
-	port: Number(process.env.REDIS_PORT ?? 6379),
-};
 
 const importer = new QueueSystem(
 	NameFactory({ name: "importer", env: "example" }),
@@ -31,16 +28,3 @@ const importer = new QueueSystem(
 			}),
 	);
 importer.addToSystem("Examples");
-// // Listen for the worker's progress events (typed listener, no `any`).
-// importer.addWorkerEventListener("progress", (_job, progress) => {
-// 	console.log("[progress]", progress);
-// });
-//
-// const job = await importer.addJob({ rows: 100 });
-// console.log(
-// 	"result:",
-// 	await job.waitUntilFinished(importer.QueueEvents, 10_000),
-// );
-//
-// await importer.close();
-// process.exit(0);

@@ -1,10 +1,6 @@
 import { Queue } from "bullmq";
 import type { QueueSystem } from "../modules/index.ts";
 
-/**
- * Connection used by the whole suite. Points at a real Redis — start one and
- * (if it isn't on the default) set REDIS_HOST / REDIS_PORT before running.
- */
 export const connection: { host: string; port: number } = {
 	host: process.env.REDIS_HOST ?? "127.0.0.1",
 	port: process.env.REDIS_PORT ? Number(process.env.REDIS_PORT) : 60866,

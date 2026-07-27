@@ -43,8 +43,8 @@ export function createJobProxy<TInput, TErrors extends ErrorRegistry>(
 			return ErrorClass;
 		},
 	});
-	// biome-ignore lint/suspicious/noExplicitAny: <This needs to be fixed I need to figure out how>
-	return new Proxy(job as any, {
+	const proxyTarget = job as Job<TInput> & Record<string | symbol, unknown>;
+	return new Proxy(proxyTarget, {
 		get(target, prop) {
 			if (prop === "errors") {
 				return errorsProxy;
@@ -71,8 +71,7 @@ const STEP_PROCESSOR_HEADER = () => `[StepProcessor]`;
 
 async function executeRollbacks(
 	job: Job,
-	// biome-ignore lint/suspicious/noExplicitAny: <This needs to be fixed I need to figure out how>
-	jobProxy: any,
+	jobProxy: TypedJob<unknown>,
 	token: Job["token"],
 	config: ProcessorConfig,
 ): Promise<void> {
@@ -90,7 +89,9 @@ async function executeRollbacks(
 					picked[key] = data[key];
 				}
 			}
-			const rollbackProxy = new Proxy(jobProxy, {
+			const rollbackTarget = jobProxy as TypedJob<unknown> &
+				Record<string | symbol, unknown>;
+			const rollbackProxy = new Proxy(rollbackTarget, {
 				get(target, prop) {
 					return prop === "data" ? picked : target[prop];
 				},
@@ -186,17 +187,19 @@ export function StepProcessor<TInput, TResult>(
 
 				// If shouldWait is false, that means all children have finished.
 				let consumedKeys = jobData.consumedKeys || [];
-				const childrenJobValues = await job.getChildrenValues();
+				const childrenJobValues = await job.getChildrenValues<unknown>();
 				const unconsumedKeys = Object.keys(childrenJobValues)
 					.filter((key) => !consumedKeys.includes(key))
 					.sort();
 				if (unconsumedKeys.length > 0) {
-					let values = unconsumedKeys.map((key) => childrenJobValues[key]);
+					const childValues = unconsumedKeys.map(
+						(key) => childrenJobValues[key],
+					);
 					consumedKeys = [...consumedKeys, ...unconsumedKeys];
 
-					if (stepConfig.singleChild) {
-						values = values[0];
-					}
+					let values: unknown = stepConfig.singleChild
+						? childValues[0]
+						: childValues;
 
 					if (stepConfig.processChildResult) {
 						values = await stepConfig.processChildResult(values);

@@ -70,16 +70,3 @@ const signup = new QueueSystem(NameFactory({ name: "signup", env: "example" }))
 			}),
 	);
 signup.addToSystem("Examples");
-// async function run(input: { email: string; optOutOfEmail: boolean }) {
-// 	// `attempts` lets BullMQ retry the flaky step natively, resuming where it left off.
-// 	const job = await signup.addJob(input, { attempts: 3 });
-// 	const result = await job.waitUntilFinished(signup.QueueEvents, 10_000);
-// 	console.log(`${input.email} ->`, result);
-// }
-//
-// await run({ email: "not-an-email", optOutOfEmail: false }); // earlyExit
-// await run({ email: "ada@example.com", optOutOfEmail: false }); // native retry, full path
-// await run({ email: "grace@example.com", optOutOfEmail: true }); // skip grantTrial
-//
-// await signup.close();
-// process.exit(0);

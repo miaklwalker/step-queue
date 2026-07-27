@@ -37,7 +37,7 @@ export type StepConfig = {
 	name: string;
 	type: "regular" | "final";
 	nextStep?: string | null;
-	hasNextStep: boolean;
+	hasNextStep?: boolean;
 	hasChildren: boolean;
 	/** Keys to delete from the job data once this step finishes. */
 	clean?: readonly string[];
@@ -46,22 +46,28 @@ export type StepConfig = {
 	 * neither this step nor any later step may list them in `clean`.
 	 */
 	rollbackKeys?: readonly string[];
-	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
-	rollback?: (job: any, token: Job["token"]) => Promise<void>;
-	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
-	handler: (job: any, token: Job["token"]) => Promise<any>;
+	rollback?: (
+		// biome-ignore lint/suspicious/noExplicitAny: the erased registry must accept a callback written against any step's own job data
+		job: TypedJob<any, any>,
+		token: Job["token"],
+	) => void | Promise<void>;
+	handler: (
+		// biome-ignore lint/suspicious/noExplicitAny: the erased registry must accept a callback written against any step's own job data
+		job: TypedJob<any, any>,
+		token: Job["token"],
+	) => Promise<unknown>;
 	progressReport?: (
-		// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
-		job: any,
+		// biome-ignore lint/suspicious/noExplicitAny: the erased registry must accept a callback written against any step's own job data
+		job: TypedJob<any, any>,
 		token: Job["token"],
 		stepName: string,
 		status: ProgressStatus,
-	) => Promise<void>;
-	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
+	) => void | Promise<void>;
+	// biome-ignore lint/suspicious/noExplicitAny: QueueSystem's generics are invariant, so no wider concrete instantiation accepts every child queue
 	childQueue?: QueueSystem<any, any, any>;
 	singleChild?: boolean;
-	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
-	processChildResult?: (results: any) => any;
+	// biome-ignore lint/suspicious/noExplicitAny: contravariant parameter accepting any step's child-result shape
+	processChildResult?: (results: any) => unknown;
 };
 
 /** Thrown when job data fails validation against the queue's input schema. */
@@ -103,8 +109,7 @@ export class ProcessorStepError extends Error {
 export class SkipStepError extends Error {
 	constructor(
 		public readonly targetStep: string | null = null,
-		// biome-ignore lint/suspicious/noExplicitAny: <todo: fix this one>
-		public readonly result: Record<string, any> = {},
+		public readonly result: Record<string, unknown> = {},
 	) {
 		super(`SkipStep:${targetStep ?? "final"}`);
 		this.name = "SkipStepError";
@@ -113,8 +118,7 @@ export class SkipStepError extends Error {
 export class SkipToFinalError extends Error {
 	constructor(
 		public readonly targetStep: string | null = null,
-		// biome-ignore lint/suspicious/noExplicitAny: <todo: fix this one>
-		public readonly result: Record<string, any> = {},
+		public readonly result: Record<string, unknown> = {},
 	) {
 		super(`SkipStep:${targetStep ?? "final"}`);
 		this.name = "SkipStepError";
@@ -122,8 +126,7 @@ export class SkipToFinalError extends Error {
 }
 
 export class EarlyExitError extends Error {
-	// biome-ignore lint/suspicious/noExplicitAny: <The parameter any replaces is never used in downstream types>
-	constructor(public readonly returnValue: any = {}) {
+	constructor(public readonly returnValue: unknown = {}) {
 		super("EarlyExit");
 		this.name = "EarlyExitError";
 	}

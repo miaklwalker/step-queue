@@ -59,10 +59,3 @@ export const myQueue = new QueueSystem(
 			}),
 	);
 myQueue.addDescription("this is a description");
-// console.log("Adding job");
-// const job = await myQueue.addJob({
-// 	user: "USERNAME",
-// 	originalPassword: "Your password must match",
-// 	newPassword: "Your password must not match!!",
-// });
-// console.log(job.id);
