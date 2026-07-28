@@ -17,10 +17,7 @@ export type StandaloneStep<
 	TRollbackKeys extends readonly PropertyKey[] = readonly [],
 > = {
 	name: string;
-	handler: (
-		job: TypedJob<TRequired>,
-		token: Job["token"],
-	) => Promise<TOutput>;
+	handler: (job: TypedJob<TRequired>, token: Job["token"]) => Promise<TOutput>;
 	rollbackKeys?: TRollbackKeys &
 		readonly (keyof (TRequired & VoidSafe<TOutput>))[];
 	rollback?: (

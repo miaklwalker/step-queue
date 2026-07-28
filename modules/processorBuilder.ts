@@ -35,7 +35,7 @@ type MergeOutput<TInput, TOutput> = [TOutput] extends [void | undefined]
 	: TInput & TOutput;
 
 // biome-ignore lint/suspicious/noExplicitAny: matching a queue structurally; its generics are captured by TChildQueue itself
-export type AnyChildQueue = QueueSystem<any, any, any>;
+export type AnyChildQueue = QueueSystem<any, any, any, any, any>;
 
 /**
  * What `processChildResult` receives — and what `<name>-results` holds when no

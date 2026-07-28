@@ -64,7 +64,7 @@ export type StepConfig = {
 		status: ProgressStatus,
 	) => void | Promise<void>;
 	// biome-ignore lint/suspicious/noExplicitAny: QueueSystem's generics are invariant, so no wider concrete instantiation accepts every child queue
-	childQueue?: QueueSystem<any, any, any>;
+	childQueue?: QueueSystem<any, any, any, any, any>;
 	singleChild?: boolean;
 	// biome-ignore lint/suspicious/noExplicitAny: contravariant parameter accepting any step's child-result shape
 	processChildResult?: (results: any) => unknown;

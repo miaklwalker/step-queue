@@ -1,7 +1,6 @@
 import { z } from "zod";
 import { NameFactory, QueueSystem } from "../modules";
-import {connection} from "../tests/support.ts";
-
+import { connection } from "../tests/support.ts";
 
 const importer = new QueueSystem(
 	NameFactory({ name: "importer", env: "example" }),

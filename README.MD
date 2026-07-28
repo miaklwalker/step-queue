@@ -686,9 +686,9 @@ than a bare string) is the usual pattern for child queues, since the parent's
 | Method | Purpose |
 | --- | --- |
 | `defineInputSchema(schema)` | Sets the Standard Schema (Zod, Valibot, ArkType, ...) that types and validates job input. |
-| `defineConnection(options)` | Sets the BullMQ `ConnectionOptions` (Redis). Required before `defineProcessor`. |
+| `defineConnection(options)` | Sets the BullMQ `ConnectionOptions` (Redis). Required before `defineProcessor`. Narrows `queue` from `Queue \| undefined` to `Queue`. |
 | `defineConcurrency(n)` | Sets worker concurrency. Defaults to `1`. |
-| `defineProcessor(buildOrBuilder)` | Declares steps and starts the `Queue` + `Worker`. Takes either a callback receiving a typed `ProcessorBuilder`, or a standalone `ProcessorBuilder` instance (un-built). |
+| `defineProcessor(buildOrBuilder)` | Declares steps and starts the `Queue` + `Worker`. Takes either a callback receiving a typed `ProcessorBuilder`, or a standalone `ProcessorBuilder` instance (un-built). Requires a connected system — calling it first is a compile error. Narrows `worker` from `Worker \| undefined` to `Worker`. |
 | `addDescription(text)` / `addToSystem(text)` | Free-form metadata fields for organizing queues; not used by the engine itself. |
 | `addJob(data, options?)` | Validates and enqueues one job. |
 | `addBulkJobs(jobs)` | Validates and enqueues many jobs in one call. |
@@ -697,6 +697,58 @@ than a bare string) is the usual pattern for child queues, since the parent's
 | `QueueEvents` | Lazily-created `QueueEvents` instance, needed by `job.waitUntilFinished(queue.QueueEvents, timeout)`. |
 | `addWorkerEventListener(event, cb)` / `removeWorkerEventListener(event, cb)` | Typed wrappers around the underlying `Worker`'s event emitter. |
 | `close()` | Gracefully closes the worker, queue, and queue events. |
+| `queue` | The underlying BullMQ `Queue`, created on first access once a connection exists. `Queue \| undefined` before `defineConnection`, plain `Queue` after it. |
+| `worker` | The underlying BullMQ `Worker`. `Worker \| undefined` before `defineProcessor`, plain `Worker` after it. |
+
+### Lifecycle narrowing
+
+`QueueSystem` carries two optional lifecycle type parameters that track how far
+the builder has been driven, so `queue` and `worker` stop being optional once
+the call that creates them has run — no `?.` and no `!` needed.
+
+```ts
+const pending = new QueueSystem(NameFactory({ name: "MyCoolQueue" }));
+pending.queue; // Queue | undefined
+pending.worker; // Worker | undefined
+
+const connected = pending.defineConnection({ host: "localhost", port: 6379 });
+connected.queue; // Queue
+connected.worker; // Worker | undefined — not started yet
+
+const running = connected.defineProcessor((step) =>
+	step.addStep({ name: "greet", handler: async () => ({ ok: true }) }),
+);
+running.queue; // Queue
+running.worker; // Worker
+```
+
+Both parameters default to `boolean`, meaning "either state", so an existing
+annotation like `QueueSystem<In, Out, Name>` still accepts a system at any
+stage and behaves exactly as it did before. Write them explicitly only when you
+want to require a stage:
+
+```ts
+// Only accepts a system that has been connected.
+function enqueueOnly<In extends JSONLike>(q: QueueSystem<In, JSONLike, string, true>) {
+	return q.queue; // Queue, no narrowing needed
+}
+```
+
+The same mechanism enforces call order. `defineProcessor` declares a `this`
+parameter requiring a connected system, so getting the order wrong fails to
+compile rather than throwing at startup:
+
+```ts
+new QueueSystem(NameFactory({ name: "MyCoolQueue" })).defineProcessor((step) =>
+	step.addStep({ name: "greet", handler: async () => ({ ok: true }) }),
+);
+// ^ error: The 'this' context of type 'QueueSystem<..., boolean, boolean>' is not
+//   assignable to method's 'this' of type 'QueueSystem<..., true, boolean>'.
+```
+
+The runtime guard is still there for JavaScript callers and for anyone who
+casts past the type — it throws the same
+`defineConnection(...) must be called before defineProcessor(...)`.
 
 `QueueInput<T>` and `QueueOutput<T>` extract a queue's input/output types for
 use elsewhere — for example, typing a function that only enqueues jobs for an

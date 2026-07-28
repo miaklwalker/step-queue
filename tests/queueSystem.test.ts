@@ -5,7 +5,7 @@ import { z } from "zod";
 import { NameFactory } from "../modules/nameFactory.ts";
 import { ProcessorBuilder } from "../modules/processorBuilder.ts";
 import { type QueueOutput, QueueSystem } from "../modules/queueSystem.ts";
-import { SchemaValidationError } from "../modules/types.ts";
+import { type JSONLike, SchemaValidationError } from "../modules/types.ts";
 import {
 	closeAll,
 	connection,
@@ -59,12 +59,13 @@ describe("QueueSystem builder (no connection needed)", () => {
 		assert.strictEqual(q.jsonSchema, undefined);
 	});
 
-	test("defineProcessor throws if connection was not defined", () => {
+	test("defineProcessor without a connection is a type error, and throws", () => {
 		const q = new QueueSystem(NameFactory({ name: "Q" })).defineInputSchema(
 			z.object({ greeting: z.string() }),
 		);
 		assert.throws(
 			() =>
+				// @ts-expect-error - `this` requires a connected system
 				q.defineProcessor((step) =>
 					step.addStep({ name: "s", handler: async () => ({}) }),
 				),
@@ -72,10 +73,11 @@ describe("QueueSystem builder (no connection needed)", () => {
 		);
 	});
 
-	test("defineProcessor accepts a ProcessorBuilder but still requires a connection", () => {
+	test("the ProcessorBuilder overload requires a connection too", () => {
 		const q = new QueueSystem(NameFactory({ name: "Q" }));
 		assert.throws(
 			() =>
+				// @ts-expect-error - `this` requires a connected system
 				q.defineProcessor(
 					ProcessorBuilder.init<{ greeting: string }>().addStep({
 						name: "s",
@@ -91,6 +93,55 @@ describe("QueueSystem builder (no connection needed)", () => {
 			z.object({ greeting: z.string() }),
 		);
 		await assert.rejects(() => q.addJob({ greeting: "hi" }), /not initialized/);
+	});
+
+	test("defineConnection collapses `queue`, defineProcessor collapses `worker`", () => {
+		// Type-only: touching `.queue` here would open a real connection.
+		const fresh = new QueueSystem(NameFactory({ name: "Q" })).defineInputSchema(
+			z.object({ greeting: z.string() }),
+		);
+		type FreshQueue = typeof fresh.queue;
+		type FreshWorker = typeof fresh.worker;
+		type _QueueOptional = Expect<
+			Equal<Extract<FreshQueue, undefined>, undefined>
+		>;
+		type _WorkerOptional = Expect<
+			Equal<Extract<FreshWorker, undefined>, undefined>
+		>;
+
+		// defineConnection narrows `queue` only — the worker doesn't exist yet.
+		const connected = fresh.defineConnection(connection);
+		type ConnectedQueue = typeof connected.queue;
+		type _QueueDefined = Expect<
+			Equal<Extract<ConnectedQueue, undefined>, never>
+		>;
+		type _SameQueue = Expect<Equal<ConnectedQueue, NonNullable<FreshQueue>>>;
+		type _WorkerStillOptional = Expect<
+			Equal<Extract<typeof connected.worker, undefined>, undefined>
+		>;
+
+		// defineProcessor narrows both.
+		type Built = ReturnType<typeof connected.defineProcessor<{ ok: boolean }>>;
+		type _BuiltQueue = Expect<Equal<Extract<Built["queue"], undefined>, never>>;
+		type _BuiltWorker = Expect<
+			Equal<Extract<Built["worker"], undefined>, never>
+		>;
+
+		// Explicitly-`false` flags are exactly `undefined`, not `T | undefined`.
+		type Neither = QueueSystem<
+			{ greeting: string },
+			JSONLike,
+			"Q",
+			false,
+			false
+		>;
+		type _NoQueue = Expect<Equal<Neither["queue"], undefined>>;
+		type _NoWorker = Expect<Equal<Neither["worker"], undefined>>;
+
+		// A narrowed system still satisfies a plain three-argument annotation.
+		const asAny: QueueSystem<{ greeting: string }, JSONLike, string> =
+			connected;
+		assert.strictEqual(asAny.name, "Q");
 	});
 });
 
@@ -119,6 +170,9 @@ describe("QueueSystem (end-to-end via BullMQ)", () => {
 
 		type Out = QueueOutput<typeof queue>;
 		type _ = Expect<Equal<Out, { done: string }>>;
+		// The narrowed `queue` is a real, single BullMQ queue instance.
+		assert.strictEqual(queue.queue.name, queue.name);
+		assert.strictEqual(queue.queue, queue.queue);
 		const out = await runToCompletion(queue, { greeting: "hi" });
 		assert.deepStrictEqual(out, { done: "HI" });
 	});
