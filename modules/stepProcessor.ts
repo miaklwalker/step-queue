@@ -15,6 +15,7 @@ export interface ProcessorConfig {
 	steps: Record<string, StepConfig>;
 	stepOrder: string[];
 	errors: ErrorRegistry;
+	debug?: boolean;
 }
 
 export function createJobProxy<TInput, TErrors extends ErrorRegistry>(
@@ -97,7 +98,11 @@ async function executeRollbacks(
 				},
 			});
 			await stepConfig.rollback(rollbackProxy, token);
-			await job.log(`${STEP_PROCESSOR_HEADER()} Rolled back step: ${stepName}`);
+			if (config.debug) {
+				await job.log(
+					`${STEP_PROCESSOR_HEADER()} Rolled back step: ${stepName}`,
+				);
+			}
 		}
 	}
 }
@@ -115,8 +120,10 @@ export function StepProcessor<TInput, TResult>(
 		if (!firstStep) {
 			throw new ProcessorStepError("No steps defined in processor");
 		}
-		const stepLog = async (message: string) =>
+		const stepLog = async (message: string) => {
+			if (!processorConfig.debug) return;
 			await job.log(`${STEP_PROCESSOR_HEADER()} ${message}`);
+		};
 
 		if (processorConfig.stepOrder.length > MAX_STEP_COUNT) {
 			throw new ProcessorStepError(

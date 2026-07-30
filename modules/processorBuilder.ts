@@ -189,6 +189,7 @@ export class ProcessorBuilder<
 		private readonly _stepOrder: string[],
 		private readonly _errors: TErrors,
 		private readonly _protectedKeys: readonly string[] = [],
+		private readonly _debug: boolean = false,
 	) {}
 
 	static init<TInitialData>() {
@@ -214,6 +215,29 @@ export class ProcessorBuilder<
 			this._stepOrder,
 			registry,
 			this._protectedKeys,
+			this._debug,
+		);
+	}
+
+	/**
+	 * Opt in to step lifecycle logging (start/finish/rollback/etc.) via
+	 * `job.log`. Off by default. Pass `false` to explicitly disable it again.
+	 */
+	debug(
+		enabled = true,
+	): ProcessorBuilder<
+		TInitialData,
+		TCurrentData,
+		TLastReturnType,
+		TErrors,
+		TProtected
+	> {
+		return new ProcessorBuilder(
+			this._steps,
+			this._stepOrder,
+			this._errors,
+			this._protectedKeys,
+			enabled,
 		);
 	}
 
@@ -252,6 +276,7 @@ export class ProcessorBuilder<
 				[stepName],
 				this._errors,
 				protectedKeys,
+				this._debug,
 			);
 		}
 		const previousStepConfig = clonedSteps[previousStep];
@@ -277,6 +302,7 @@ export class ProcessorBuilder<
 			[...this._stepOrder, stepName],
 			this._errors,
 			protectedKeys,
+			this._debug,
 		);
 	}
 
@@ -412,6 +438,7 @@ export class ProcessorBuilder<
 			steps,
 			stepOrder,
 			errors: this._errors,
+			debug: this._debug,
 		});
 	}
 }
