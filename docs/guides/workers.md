@@ -3,7 +3,7 @@ title: "Workers, Concurrency & Progress"
 description: "How QueueSystem starts a BullMQ worker, tuning concurrency, listening to worker events, and reporting step progress."
 ---
 
-`defineProcessor` is what actually starts a BullMQ `Worker` — everything before it (`defineInputSchema`, `defineConnection`, `defineConcurrency`) only configures what that worker will be.
+`defineProcessor` is what actually starts a BullMQ `Worker`: everything before it (`defineInputSchema`, `defineConnection`, `defineConcurrency`) only configures what that worker will be.
 
 ## Starting the worker
 
@@ -19,7 +19,7 @@ const myQueue = new QueueSystem(NameFactory({ name: "MyCoolQueue", env: "dev" })
   );
 ```
 
-`defineProcessor` requires a connected system — `defineConnection` must run first. This is enforced at the type level: calling `defineProcessor` before `defineConnection` is a compile error (`this` parameter requires `TConnected` to be `true`), with a matching runtime guard for JavaScript callers or code that casts past the type.
+`defineProcessor` requires a connected system: `defineConnection` must run first. This is enforced at the type level: calling `defineProcessor` before `defineConnection` is a compile error (`this` parameter requires `TConnected` to be `true`), with a matching runtime guard for JavaScript callers or code that casts past the type.
 
 `defineProcessor` also narrows `worker` from `Worker | undefined` to `Worker`, and `queue` was already narrowed to `Queue` by `defineConnection`:
 
@@ -54,7 +54,7 @@ const myQueue = new QueueSystem(NameFactory({ name: "MyCoolQueue" }))
 
 ## Listening to worker events
 
-`addWorkerEventListener` / `removeWorkerEventListener` are typed wrappers around the underlying `Worker`'s event emitter — no `any` in the callback signature.
+`addWorkerEventListener` / `removeWorkerEventListener` are typed wrappers around the underlying `Worker`'s event emitter: no `any` in the callback signature.
 
 ```ts
 importer.addWorkerEventListener("progress", (_job, progress) => {
@@ -73,7 +73,7 @@ importer.addWorkerEventListener("failed", (job, err) => {
 There are two independent ways to surface progress from a step:
 
 - `job.updateStepProgress({...})`, called from inside a handler, merges custom data into the job's BullMQ progress and emits a `"progress"` event on the worker.
-- A `progressReport` callback on a step, invoked automatically at `"start"`, `"finish"`, `"skip"`, and (for a step with a `childQueue`) `"child-finish"` — useful for logging or pushing updates without cluttering the handler itself.
+- A `progressReport` callback on a step, invoked automatically at `"start"`, `"finish"`, `"skip"`, and (for a step with a `childQueue`) `"child-finish"`, useful for logging or pushing updates without cluttering the handler itself.
 
 ```ts
 const importer = new QueueSystem(NameFactory({ name: "importer", env: "example" }))

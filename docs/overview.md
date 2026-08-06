@@ -3,7 +3,7 @@ title: "Overview"
 description: "Why Step Queue exists and the core idea behind it: type-safe, accumulating steps built on top of BullMQ."
 ---
 
-Step Queue is a type-safe, step-based wrapper around [BullMQ](https://docs.bullmq.io/). It lets you define a BullMQ job as a sequence of typed steps instead of one opaque processor function. Job data accumulates as it moves through the pipeline, so each step is typed against exactly what the steps before it produced. If a job fails and BullMQ retries it, the job resumes on the exact step it left off at — which makes it possible to write steps that are idempotent instead of re-running the whole job from the start.
+Step Queue is a type-safe, step-based wrapper around [BullMQ](https://docs.bullmq.io/). It lets you define a BullMQ job as a sequence of typed steps instead of one opaque processor function. Job data accumulates as it moves through the pipeline, so each step is typed against exactly what the steps before it produced. If a job fails and BullMQ retries it, the job resumes on the exact step it left off at, which makes it possible to write steps that are idempotent instead of re-running the whole job from the start.
 
 ## The problem with raw BullMQ multi-step jobs
 
@@ -58,7 +58,7 @@ const worker = new Worker(
 );
 ```
 
-This is fine for a short job. It stops being fine once the logic gets long and has to wait on children more than once: the step enum, the `switch`, and the `moveToWaitingChildren` / `WaitingChildrenError` pair have to be repeated and kept in sync at every wait point, `job.data` is untyped inside every `case`, and it is easy to forget the `await job.updateData(...)` before a step that can throw — which silently breaks resumption on the next retry.
+This is fine for a short job. It stops being fine once the logic gets long and has to wait on children more than once: the step enum, the `switch`, and the `moveToWaitingChildren` / `WaitingChildrenError` pair have to be repeated and kept in sync at every wait point, `job.data` is untyped inside every `case`, and it is easy to forget the `await job.updateData(...)` before a step that can throw, which silently breaks resumption on the next retry.
 
 ## The core idea
 
@@ -91,7 +91,7 @@ A handler either returns an object, which is merged into the accumulated job dat
 
 ## Where to go next
 
-- [Installation](installation) — add the package and the `bullmq` peer dependency.
-- [Quick Start](quick-start) — a complete worked job end to end.
-- [Steps & Data Accumulation](guides/steps) — the mechanics of `addStep`, `addFinalStep`, and `clean`.
-- [Resuming After Failure](guides/resuming) — how a retried job picks up where it left off.
+- [Installation](installation): add the package and the `bullmq` peer dependency.
+- [Quick Start](quick-start): a complete worked job end to end.
+- [Steps & Data Accumulation](guides/steps): the mechanics of `addStep`, `addFinalStep`, and `clean`.
+- [Resuming After Failure](guides/resuming): how a retried job picks up where it left off.

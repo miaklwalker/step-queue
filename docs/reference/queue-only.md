@@ -23,7 +23,7 @@ const producer = new QueueOnly(
 await producer.addJob({ greeting: "hi" });
 ```
 
-`QueueOnly` does not take an input schema, so it does not validate job data at enqueue time — the assumption is that whatever process defines the schema (via a `QueueSystem` on the consuming side) is the source of truth for the shape.
+`QueueOnly` does not take an input schema, so it does not validate job data at enqueue time: the assumption is that whatever process defines the schema (via a `QueueSystem` on the consuming side) is the source of truth for the shape.
 
 ## Constructor
 
@@ -34,7 +34,7 @@ new QueueOnly(
 )
 ```
 
-`nameConfig` is typically the output of [`NameFactory`](name-factory). Unlike `QueueSystem`, the connection is required up front — `QueueOnly` constructs its `Queue` immediately.
+`nameConfig` is typically the output of [`NameFactory`](name-factory). Unlike `QueueSystem`, the connection is required up front: `QueueOnly` constructs its `Queue` immediately.
 
 ## Methods
 
@@ -93,7 +93,7 @@ Closes the queue and any `QueueEvents` instance that was created.
 | --- | --- | --- |
 | `name` | `TName` | The BullMQ queue key (from `NameFactory`). |
 | `displayName` | `string` | Human-readable name (from `NameFactory`). |
-| `queue` | `Queue<TInput, TOutput, TName, TInput, TOutput, TName>` | The underlying BullMQ queue — always present, unlike `QueueSystem.queue`, since `QueueOnly` constructs it immediately. |
+| `queue` | `Queue<TInput, TOutput, TName, TInput, TOutput, TName>` | The underlying BullMQ queue, always present, unlike `QueueSystem.queue`, since `QueueOnly` constructs it immediately. |
 | `QueueEvents` | `QueueEvents` (getter) | Lazily-created `QueueEvents` instance. |
 
 ## `QueueOnlyInput<T>` / `QueueOnlyOutput<T>`

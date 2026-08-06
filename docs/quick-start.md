@@ -30,9 +30,9 @@ const myQueue = new QueueSystem(NameFactory({ name: "MyCoolQueue", env: "dev" })
   );
 ```
 
-`NameFactory` builds the queue's internal BullMQ name and its display name — see [NameFactory reference](reference/name-factory). `defineInputSchema`'s callback infers the shape of `job.data` for the first step; `defineProcessor`'s callback receives a `ProcessorBuilder` already typed with that schema.
+`NameFactory` builds the queue's internal BullMQ name and its display name. See [NameFactory reference](reference/name-factory). `defineInputSchema`'s callback infers the shape of `job.data` for the first step; `defineProcessor`'s callback receives a `ProcessorBuilder` already typed with that schema.
 
-`addStep` runs `"shout"` first. It reads `job.data.greeting` (typed `string` from the schema) and returns `{ shout: ... }`, which is merged into the accumulated data. `addFinalStep` marks the end of the pipeline — its return value becomes the job's result, and `job.data.shout` is typed `string` because the `"shout"` step declared it.
+`addStep` runs `"shout"` first. It reads `job.data.greeting` (typed `string` from the schema) and returns `{ shout: ... }`, which is merged into the accumulated data. `addFinalStep` marks the end of the pipeline. Its return value becomes the job's result, and `job.data.shout` is typed `string` because the `"shout"` step declared it.
 
 ## Enqueue a job
 
@@ -41,7 +41,7 @@ const myQueue = new QueueSystem(NameFactory({ name: "MyCoolQueue", env: "dev" })
 const job = await myQueue.addJob({ greeting: "hi" });
 ```
 
-`addJob` validates `jobData` against the schema passed to `defineInputSchema` before enqueueing. Invalid data throws `SchemaValidationError` immediately — the job never reaches Redis or a worker. See [Typed Input & Schema Validation](guides/schema-validation).
+`addJob` validates `jobData` against the schema passed to `defineInputSchema` before enqueueing. Invalid data throws `SchemaValidationError` immediately: the job never reaches Redis or a worker. See [Typed Input & Schema Validation](guides/schema-validation).
 
 ## Wait for the result
 
@@ -65,6 +65,6 @@ await myQueue.close();
 
 ## Where this goes next
 
-- [Steps & Data Accumulation](guides/steps) — how `addStep`, `addFinalStep`, and `clean` shape the accumulated type.
-- [Resuming After Failure](guides/resuming) — what happens when a step throws and the job retries.
-- [Waiting on Child Jobs](guides/child-queues) — fanning work out to another queue mid-pipeline.
+- [Steps & Data Accumulation](guides/steps): how `addStep`, `addFinalStep`, and `clean` shape the accumulated type.
+- [Resuming After Failure](guides/resuming): what happens when a step throws and the job retries.
+- [Waiting on Child Jobs](guides/child-queues): fanning work out to another queue mid-pipeline.

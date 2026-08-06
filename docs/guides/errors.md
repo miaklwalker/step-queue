@@ -60,11 +60,11 @@ const signup = new QueueSystem(NameFactory({ name: "signup", env: "example" }))
   );
 ```
 
-None of these three are treated as a job failure — BullMQ never sees them as an error and never retries because of them.
+None of these three are treated as a job failure: BullMQ never sees them as an error and never retries because of them.
 
 ## Typed errors
 
-Beyond control-flow actions, a processor can register its own error codes with `.errors(...)` and throw them by name from any step. Unlike `actionErrors`, these are thrown directly — `job.errors.CODE` is already an error instance, not a class.
+Beyond control-flow actions, a processor can register its own error codes with `.errors(...)` and throw them by name from any step. Unlike `actionErrors`, these are thrown directly: `job.errors.CODE` is already an error instance, not a class.
 
 ```ts
 const q = new QueueSystem(NameFactory({ name: "ChangePassword" }))
@@ -91,17 +91,17 @@ const q = new QueueSystem(NameFactory({ name: "ChangePassword" }))
 
 Throwing an unregistered code (a typo, or a code from a different processor) throws immediately with a message pointing at the missing `.errors()` registration, rather than silently producing `undefined`.
 
-A typed error is not a control-flow action — it fails the step exactly like any other thrown error, described next.
+A typed error is not a control-flow action: it fails the step exactly like any other thrown error, described next.
 
 ## What happens when a step fails
 
-An error thrown from a handler that is not one of the control-flow actions above (including a registered typed error) fails the step: the processor runs rollbacks for every completed step, in reverse order, and re-throws — which BullMQ records as a failed job. If the job's `attempts` option allows another try, BullMQ retries it and the processor resumes from the failed step; see [Resuming After Failure](resuming).
+An error thrown from a handler that is not one of the control-flow actions above (including a registered typed error) fails the step: the processor runs rollbacks for every completed step, in reverse order, and re-throws, which BullMQ records as a failed job. If the job's `attempts` option allows another try, BullMQ retries it and the processor resumes from the failed step; see [Resuming After Failure](resuming).
 
 ## Rollbacks
 
-A step can declare a `rollback`, run only if a *later* step in the same job fails. Rollbacks run in reverse completion order — the most recently completed step rolls back first.
+A step can declare a `rollback`, run only if a *later* step in the same job fails. Rollbacks run in reverse completion order: the most recently completed step rolls back first.
 
-By default a rollback receives no job data at all: it has to explicitly ask for what it needs via `rollbackKeys`. Requesting a key does two things — it narrows `job.data` inside `rollback` to exactly those keys, and it reserves those keys so neither this step nor any later step can `clean` them, guaranteeing they still exist if the rollback actually runs.
+By default a rollback receives no job data at all: it has to explicitly ask for what it needs via `rollbackKeys`. Requesting a key does two things: it narrows `job.data` inside `rollback` to exactly those keys, and it reserves those keys so neither this step nor any later step can `clean` them, guaranteeing they still exist if the rollback actually runs.
 
 ```ts
 const queue = new QueueSystem(NameFactory({ name: "charge" }))
@@ -149,4 +149,4 @@ ProcessorBuilder.init<{ a: number; b: string }>()
   });
 ```
 
-Rollbacks are also declarable on a `childQueue` step and on a standalone step created with `defineStep` — the same `rollbackKeys` narrowing applies in both cases.
+Rollbacks are also declarable on a `childQueue` step and on a standalone step created with `defineStep`: the same `rollbackKeys` narrowing applies in both cases.

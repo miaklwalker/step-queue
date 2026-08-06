@@ -33,7 +33,7 @@ defineInputSchema<TSchema extends JSONLike>(
 ): QueueSystem<TSchema, TOutput, TName, TConnected, TStarted>
 ```
 
-Sets the [Standard Schema](https://standardschema.dev) that types and validates job input. Infers the initial `job.data` type for the first step, and — if the schema's vendor supports JSON Schema conversion — populates `jsonSchema`. See [Typed Input & Schema Validation](../guides/schema-validation).
+Sets the [Standard Schema](https://standardschema.dev) that types and validates job input. Infers the initial `job.data` type for the first step. If the schema's vendor supports JSON Schema conversion, it also populates `jsonSchema`. See [Typed Input & Schema Validation](../guides/schema-validation).
 
 ### `defineConnection(connection)`
 
@@ -69,7 +69,7 @@ defineProcessor<TNewInput extends TInput, TNewOutput extends JSONLike>(
 ): QueueSystem<TNewInput, TNewOutput, TName, true, true>;
 ```
 
-Declares steps and starts the `Queue` + `Worker`. Takes either a callback receiving a typed `ProcessorBuilder`, or a standalone `ProcessorBuilder` instance (un-built, via `ProcessorBuilder.init<T>()`). Requires a connected system — calling it before `defineConnection` is a compile error via the `this` parameter, with a matching runtime guard (`defineConnection(...) must be called before defineProcessor(...)`) for callers that bypass the type check. Narrows `queue` and `worker` to non-optional. See [ProcessorBuilder reference](processor-builder).
+Declares steps and starts the `Queue` + `Worker`. Takes either a callback receiving a typed `ProcessorBuilder`, or a standalone `ProcessorBuilder` instance (un-built, via `ProcessorBuilder.init<T>()`). Requires a connected system: calling it before `defineConnection` is a compile error via the `this` parameter, with a matching runtime guard (`defineConnection(...) must be called before defineProcessor(...)`) for callers that bypass the type check. Narrows `queue` and `worker` to non-optional. See [ProcessorBuilder reference](processor-builder).
 
 ### `addDescription(text)` / `addToSystem(text)`
 
@@ -160,7 +160,7 @@ Gracefully closes the worker, queue, and queue events.
 
 ## Lifecycle narrowing
 
-`QueueSystem` carries two optional lifecycle type parameters that track how far the builder has been driven, so `queue` and `worker` stop being optional once the call that creates them has run — no `?.` and no `!` needed.
+`QueueSystem` carries two optional lifecycle type parameters that track how far the builder has been driven, so `queue` and `worker` stop being optional once the call that creates them has run, no `?.` and no `!` needed.
 
 ```ts
 const pending = new QueueSystem(NameFactory({ name: "MyCoolQueue" }));
@@ -204,7 +204,7 @@ type QueueInput<T> = T extends QueueSystem<infer I, any, any, any, any> ? I : ne
 type QueueOutput<T> = T extends QueueSystem<any, infer O, any, any, any> ? O : never;
 ```
 
-Extract a queue's input/output types for use elsewhere — for example, typing a function that only enqueues jobs for an already-built queue.
+Extract a queue's input/output types for use elsewhere: for example, typing a function that only enqueues jobs for an already-built queue.
 
 ```ts
 import type { QueueInput, QueueOutput } from "@michaelrwalker/step-queue";

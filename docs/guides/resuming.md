@@ -7,9 +7,9 @@ The reason Step Queue exists is to make resumable, multi-step jobs easy to write
 
 ## How resumption works
 
-The processor tracks its own position in the job data using a few reserved keys: `step` (the current step name), `previousStep`, `consumedKeys` (child results already collected), and `completedSteps` (used for rollback ordering). After every step completes, and before moving on, the processor calls BullMQ's `job.updateData(...)` to persist that position — including the merged result of the step that just ran.
+The processor tracks its own position in the job data using a few reserved keys: `step` (the current step name), `previousStep`, `consumedKeys` (child results already collected), and `completedSteps` (used for rollback ordering). After every step completes, and before moving on, the processor calls BullMQ's `job.updateData(...)` to persist that position, including the merged result of the step that just ran.
 
-When a worker picks up a job — whether for the first time or as a BullMQ retry — it reads `job.data.step`. If it's unset, the job starts at the first declared step. If it's set (because a previous attempt got partway through), the job resumes from that exact step, with `job.data` already containing everything every prior step produced.
+When a worker picks up a job, whether for the first time or as a BullMQ retry, it reads `job.data.step`. If it's unset, the job starts at the first declared step. If it's set (because a previous attempt got partway through), the job resumes from that exact step, with `job.data` already containing everything every prior step produced.
 
 This means a retried job does not restart from the input. It restarts from wherever it left off, with the accumulated data intact.
 
@@ -66,19 +66,19 @@ const signup = new QueueSystem(NameFactory({ name: "signup", env: "example" }))
   );
 ```
 
-On the first attempt, `"validate"` runs and completes; `"reserveUsername"` throws. BullMQ marks the job failed and — because `attempts` is greater than 1 — schedules a retry. The retry re-enters the processor with `job.data.step === "reserveUsername"` and `job.data.validated === true` already present. `"validate"` does not run again.
+On the first attempt, `"validate"` runs and completes; `"reserveUsername"` throws. BullMQ marks the job failed and, because `attempts` is greater than 1, schedules a retry. The retry re-enters the processor with `job.data.step === "reserveUsername"` and `job.data.validated === true` already present. `"validate"` does not run again.
 
 ## Writing idempotent steps
 
 Because a step can run more than once (its own retries, or a worker restart mid-step before `job.updateData` committed), a handler should be safe to re-run with the same input. Concretely:
 
-- Prefer operations that are naturally idempotent — an upsert instead of an insert, a `PUT` instead of a `POST` that creates a new resource each time.
+- Prefer operations that are naturally idempotent: an upsert instead of an insert, a `PUT` instead of a `POST` that creates a new resource each time.
 - If a step calls an external API that isn't idempotent, key the call on something derived from the job (a job ID, an input field) so a duplicate call is detected and short-circuited on the far end.
-- Don't rely on side effects from earlier in the *same* step persisting if the step throws partway through — until the handler returns and `job.updateData` runs, nothing it did is recorded in `job.data`.
+- Don't rely on side effects from earlier in the *same* step persisting if the step throws partway through: until the handler returns and `job.updateData` runs, nothing it did is recorded in `job.data`.
 
 ## What is *not* automatically retried
 
-A handler that throws one of `job.actionErrors` (`skip`, `skipToFinal`, `earlyExit`) is not a failure — those are control-flow signals the processor handles itself, not something BullMQ retries. See [Errors, Control Flow & Rollbacks](errors). Only an error that reaches BullMQ as a job failure triggers a retry (subject to `attempts`), and rollbacks for every completed step run first, in reverse order, before the error is re-thrown.
+A handler that throws one of `job.actionErrors` (`skip`, `skipToFinal`, `earlyExit`) is not a failure: those are control-flow signals the processor handles itself, not something BullMQ retries. See [Errors, Control Flow & Rollbacks](errors). Only an error that reaches BullMQ as a job failure triggers a retry (subject to `attempts`), and rollbacks for every completed step run first, in reverse order, before the error is re-thrown.
 
 ## Limits
 

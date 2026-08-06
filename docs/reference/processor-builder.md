@@ -3,7 +3,7 @@ title: "ProcessorBuilder"
 description: "Full API reference for ProcessorBuilder, TypedJob, standalone steps, and the error/control-flow classes."
 ---
 
-`ProcessorBuilder` accumulates steps and their types. It's usually received via `defineProcessor`'s callback, but can also be constructed standalone with `ProcessorBuilder.init<T>()` and passed to `defineProcessor` directly — see [Typed Input & Schema Validation](../guides/schema-validation).
+`ProcessorBuilder` accumulates steps and their types. It's usually received via `defineProcessor`'s callback, but can also be constructed standalone with `ProcessorBuilder.init<T>()` and passed to `defineProcessor` directly. See [Typed Input & Schema Validation](../guides/schema-validation).
 
 ```ts
 class ProcessorBuilder<
@@ -105,7 +105,7 @@ addFinalStep<TStepOutput>(stepConfig: {
 }): ProcessorBuilder<TInitialData, TCurrentData, TStepOutput, TErrors>
 ```
 
-Marks the end of the pipeline. Throws `AddStepError` if a step is added after it, or if a step is (re-)named `__final__step__` — the reserved internal name for an implicit final step.
+Marks the end of the pipeline. Throws `AddStepError` if a step is added after it, or if a step is (re-)named `__final__step__`: the reserved internal name for an implicit final step.
 
 ### `build()`
 
@@ -113,11 +113,11 @@ Marks the end of the pipeline. Throws `AddStepError` if a step is added after it
 build(): Processor<TInitialData, TLastReturnType>
 ```
 
-Compiles the accumulated steps into the function BullMQ's `Worker` actually runs, inserting an implicit final step if `addFinalStep` was never called. **Don't call this yourself** when passing a builder to `QueueSystem.defineProcessor` — it calls `build()` for you in both the callback and standalone-builder forms. Throws `AddStepError` if the builder has no steps at all.
+Compiles the accumulated steps into the function BullMQ's `Worker` actually runs, inserting an implicit final step if `addFinalStep` was never called. **Don't call this yourself** when passing a builder to `QueueSystem.defineProcessor`: it calls `build()` for you in both the callback and standalone-builder forms. Throws `AddStepError` if the builder has no steps at all.
 
 ## `TypedJob<TData, TErrors>`
 
-The `job` a handler receives — a normal BullMQ `Job` with `data` narrowed to the type accumulated so far, plus a few additions:
+The `job` a handler receives, a normal BullMQ `Job` with `data` narrowed to the type accumulated so far, plus a few additions:
 
 ```ts
 type TypedJob<TData, TErrors extends ErrorRegistry = Record<string, string>> = Omit<Job, "data"> & {
@@ -157,17 +157,17 @@ function defineSteps<TSteps extends Record<string, StandaloneStep<any, any>>>(
 ): TSteps
 ```
 
-Groups several standalone steps under one namespace — purely an organizational identity function; it does not merge or validate the steps against each other.
+Groups several standalone steps under one namespace: purely an organizational identity function; it does not merge or validate the steps against each other.
 
 ## Error and control-flow classes
 
 | Class | Thrown by | Meaning |
 | --- | --- | --- |
 | `SchemaValidationError` | `QueueSystem.addJob` / `addBulkJobs` | Job data failed the schema passed to `defineInputSchema`. Carries `issues: ReadonlyArray<StandardSchemaV1.Issue>`. |
-| `AddStepError` | `ProcessorBuilder.addStep` / `addFinalStep` / `build` | A structural problem in the processor definition itself (duplicate name, reserved key, empty processor) — thrown while building, before any job runs. |
+| `AddStepError` | `ProcessorBuilder.addStep` / `addFinalStep` / `build` | A structural problem in the processor definition itself (duplicate name, reserved key, empty processor), thrown while building, before any job runs. |
 | `ProcessorStepError` | The running processor | A runtime processor invariant was violated (missing step config, too many steps, no next step after a step that isn't final). Also the underlying class behind registered `.errors()` codes. |
-| `SkipStepError` | `job.actionErrors.skip` | Thrown by handler code to jump to a named step. Caught internally by the processor — not a job failure. |
-| `SkipToFinalError` | `job.actionErrors.skipToFinal` | Thrown by handler code to jump straight to the final step. Caught internally — not a job failure. |
-| `EarlyExitError` | `job.actionErrors.earlyExit` | Thrown by handler code to end the processor immediately with a given return value. Caught internally — not a job failure. |
+| `SkipStepError` | `job.actionErrors.skip` | Thrown by handler code to jump to a named step. Caught internally by the processor, not a job failure. |
+| `SkipToFinalError` | `job.actionErrors.skipToFinal` | Thrown by handler code to jump straight to the final step. Caught internally, not a job failure. |
+| `EarlyExitError` | `job.actionErrors.earlyExit` | Thrown by handler code to end the processor immediately with a given return value. Caught internally, not a job failure. |
 
 See [Errors, Control Flow & Rollbacks](../guides/errors) for how these are used from inside a handler.

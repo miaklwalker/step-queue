@@ -3,10 +3,10 @@ title: "Typed Input & Schema Validation"
 description: "How defineInputSchema types the first step and validates job data at enqueue time using Standard Schema."
 ---
 
-`defineInputSchema` takes any [Standard Schema](https://standardschema.dev) — Zod, Valibot, ArkType, Effect Schema, and other compliant libraries all work. It does two things:
+`defineInputSchema` takes any [Standard Schema](https://standardschema.dev): Zod, Valibot, ArkType, Effect Schema, and other compliant libraries all work. It does two things:
 
 1. Infers the initial shape of `job.data` for the first step, so the rest of the processor is typed from it without any manual generic annotation.
-2. Validates every job's data against the schema at `addJob` / `addBulkJobs` time — invalid data is rejected with a `SchemaValidationError` (carrying the standard `issues` array) before it ever reaches a worker.
+2. Validates every job's data against the schema at `addJob` / `addBulkJobs` time: invalid data is rejected with a `SchemaValidationError` (carrying the standard `issues` array) before it ever reaches a worker.
 
 ```ts
 const q = new QueueSystem(NameFactory({ name: "Orders" }))
@@ -39,11 +39,11 @@ try {
 }
 ```
 
-Because validation runs before `queue.add(...)`, a rejected job never touches Redis — it fails synchronously in the calling process.
+Because validation runs before `queue.add(...)`, a rejected job never touches Redis. It fails synchronously in the calling process.
 
 ## Deriving a JSON Schema
 
-If the schema library supports Standard Schema's JSON Schema extension (`StandardJSONSchemaV1` — Zod 4 does, for example), the schema is also converted to a JSON Schema and exposed as `q.jsonSchema`, useful for documenting or externally validating a queue's expected input without pulling in the schema library on the reading side. For libraries without that support, `q.jsonSchema` stays `undefined`.
+If the schema library supports Standard Schema's JSON Schema extension (`StandardJSONSchemaV1`, which Zod 4 does, for example), the schema is also converted to a JSON Schema and exposed as `q.jsonSchema`, useful for documenting or externally validating a queue's expected input without pulling in the schema library on the reading side. For libraries without that support, `q.jsonSchema` stays `undefined`.
 
 ```ts
 const q = new QueueSystem(NameFactory({ name: "Orders" })).defineInputSchema(
@@ -56,11 +56,11 @@ q.jsonSchema;
 
 ## Skipping schema validation
 
-`defineInputSchema` is optional. Without it, `job.data`'s initial type has to come from somewhere else — typically by constructing the processor with `ProcessorBuilder.init<T>()` and passing it to `defineProcessor` directly (see [ProcessorBuilder reference](../reference/processor-builder)) — and job data is enqueued without runtime validation. This is also the case for `QueueOnly`, which never validates: the assumption is that whichever process defines the schema (a `QueueSystem` on the consuming side) is the source of truth for the shape. See [QueueOnly reference](../reference/queue-only).
+`defineInputSchema` is optional. Without it, `job.data`'s initial type has to come from somewhere else, typically by constructing the processor with `ProcessorBuilder.init<T>()` and passing it to `defineProcessor` directly (see [ProcessorBuilder reference](../reference/processor-builder)), and job data is enqueued without runtime validation. This is also the case for `QueueOnly`, which never validates: the assumption is that whichever process defines the schema (a `QueueSystem` on the consuming side) is the source of truth for the shape. See [QueueOnly reference](../reference/queue-only).
 
 ## Standalone `ProcessorBuilder` and the input type
 
-`defineProcessor` also accepts a `ProcessorBuilder` you construct yourself, useful when the steps are defined away from the queue (shared, tested, or composed elsewhere). Don't call `.build()` on it — `defineProcessor` builds the processor in both forms. When a standalone builder is passed, the queue's input type is inferred from `ProcessorBuilder.init<T>()`, not from `defineInputSchema`:
+`defineProcessor` also accepts a `ProcessorBuilder` you construct yourself, useful when the steps are defined away from the queue (shared, tested, or composed elsewhere). Don't call `.build()` on it: `defineProcessor` builds the processor in both forms. When a standalone builder is passed, the queue's input type is inferred from `ProcessorBuilder.init<T>()`, not from `defineInputSchema`:
 
 ```ts
 import { QueueSystem, NameFactory, ProcessorBuilder } from "@michaelrwalker/step-queue";
@@ -81,4 +81,4 @@ const myQueue = new QueueSystem(NameFactory({ name: "MyCoolQueue", env: "dev" })
 // addJob is typed { greeting: string }; results are typed { done: string }
 ```
 
-A standalone builder passed to `defineProcessor` does not get runtime validation from a schema, even alongside `defineInputSchema` — only `defineInputSchema` wires that up.
+A standalone builder passed to `defineProcessor` does not get runtime validation from a schema, even alongside `defineInputSchema`: only `defineInputSchema` wires that up.
