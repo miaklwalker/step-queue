@@ -31,6 +31,8 @@ export const INTERNAL_KEYS = [
 	"previousStep",
 	"consumedKeys",
 	"completedSteps",
+	"recoverStep",
+	"recoverAttempts",
 ] as const;
 
 export type StepConfig = {
@@ -132,10 +134,50 @@ export class EarlyExitError extends Error {
 	}
 }
 
+/** Default cap on how many times a single step may recover before its job fails. */
+export const DEFAULT_RECOVER_MAX_ATTEMPTS = 3;
+
+/**
+ * Thrown by a step handler to hand off a failure to a child job instead of
+ * failing outright. The processor adds `childData` as a child job on
+ * `childQueue`, parks the parent in WaitingChildren, and re-runs this same
+ * step once the child completes — no `QueueEvents` listener required.
+ *
+ * `TChildInput` is inferred from `childQueue` at the throw site, so `childData`
+ * is checked against that queue's own input schema.
+ */
+export class RecoverWithChildError<
+	TChildInput extends JSONLike = JSONLike,
+> extends Error {
+	constructor(
+		// biome-ignore lint/suspicious/noExplicitAny: erased here so any concrete QueueSystem is accepted; TChildInput is captured from this argument at the (generic) throw site
+		public readonly childQueue: QueueSystem<TChildInput, any, any, any, any>,
+		public readonly childData: TChildInput,
+		public readonly options?: { maxAttempts?: number },
+	) {
+		super("RecoverWithChild");
+		this.name = "RecoverWithChildError";
+	}
+}
+
+/** Thrown when a step's recover attempts exceed its `maxAttempts`; fails the job. */
+export class RecoverAttemptsExceededError extends Error {
+	constructor(
+		public readonly stepName: string,
+		public readonly maxAttempts: number,
+	) {
+		super(
+			`Step "${stepName}" exceeded its recover maxAttempts (${maxAttempts}); failing the job.`,
+		);
+		this.name = "RecoverAttemptsExceededError";
+	}
+}
+
 export const actionErrors = {
 	skip: SkipStepError,
 	earlyExit: EarlyExitError,
 	skipToFinal: SkipToFinalError,
+	recover: RecoverWithChildError,
 };
 
 export type TypedJob<

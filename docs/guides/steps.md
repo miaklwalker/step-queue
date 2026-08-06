@@ -26,7 +26,7 @@ processor
 
 `addFinalStep` marks the end of the pipeline; its return value becomes the job's result, what `job.waitUntilFinished` resolves to. A final step cannot have a next step, and no step may be added after it.
 
-If `addFinalStep` is never called, one is inserted automatically. Its result is the accumulated job data with Step Queue's own bookkeeping keys (`step`, `previousStep`, `consumedKeys`, `completedSteps`) stripped out, so the queue's output type matches whatever the last declared step produced without those internal fields leaking into it.
+If `addFinalStep` is never called, one is inserted automatically. Its result is the accumulated job data with Step Queue's own bookkeeping keys (`step`, `previousStep`, `consumedKeys`, `completedSteps`, `recoverStep`, `recoverAttempts`) stripped out, so the queue's output type matches whatever the last declared step produced without those internal fields leaking into it.
 
 ## The `clean` feature
 

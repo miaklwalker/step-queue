@@ -127,6 +127,7 @@ type TypedJob<TData, TErrors extends ErrorRegistry = Record<string, string>> = O
     readonly skip: typeof SkipStepError;
     readonly earlyExit: typeof EarlyExitError;
     readonly skipToFinal: typeof SkipToFinalError;
+    readonly recover: typeof RecoverWithChildError;
   };
   updateStepProgress: (data: Record<string, unknown>) => Promise<void>;
 };
@@ -169,5 +170,7 @@ Groups several standalone steps under one namespace: purely an organizational id
 | `SkipStepError` | `job.actionErrors.skip` | Thrown by handler code to jump to a named step. Caught internally by the processor, not a job failure. |
 | `SkipToFinalError` | `job.actionErrors.skipToFinal` | Thrown by handler code to jump straight to the final step. Caught internally, not a job failure. |
 | `EarlyExitError` | `job.actionErrors.earlyExit` | Thrown by handler code to end the processor immediately with a given return value. Caught internally, not a job failure. |
+| `RecoverWithChildError` | `job.actionErrors.recover` | Thrown by handler code to add a child job and retry this same step once it completes. Caught internally; only becomes a job failure if `maxAttempts` is exceeded. |
+| `RecoverAttemptsExceededError` | The running processor | A step's `recover` calls exceeded `maxAttempts`. Rollbacks run first, then the job fails with this error. |
 
-See [Errors, Control Flow & Rollbacks](../guides/errors) for how these are used from inside a handler.
+See [Errors, Control Flow & Rollbacks](../guides/errors) and [Recovering From a Failure](../guides/recovering) for how these are used from inside a handler.

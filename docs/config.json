@@ -15,6 +15,7 @@
         { "label": "Resuming After Failure", "to": "guides/resuming" },
         { "label": "Errors, Control Flow & Rollbacks", "to": "guides/errors" },
         { "label": "Waiting on Child Jobs", "to": "guides/child-queues" },
+        { "label": "Recovering From a Failure", "to": "guides/recovering" },
         { "label": "Workers, Concurrency & Progress", "to": "guides/workers" },
         { "label": "Typed Input & Schema Validation", "to": "guides/schema-validation" }
       ]

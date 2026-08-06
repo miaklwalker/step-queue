@@ -7,7 +7,7 @@ The reason Step Queue exists is to make resumable, multi-step jobs easy to write
 
 ## How resumption works
 
-The processor tracks its own position in the job data using a few reserved keys: `step` (the current step name), `previousStep`, `consumedKeys` (child results already collected), and `completedSteps` (used for rollback ordering). After every step completes, and before moving on, the processor calls BullMQ's `job.updateData(...)` to persist that position, including the merged result of the step that just ran.
+The processor tracks its own position in the job data using a few reserved keys: `step` (the current step name), `previousStep`, `consumedKeys` (child results already collected), `completedSteps` (used for rollback ordering), and `recoverStep` / `recoverAttempts` (used by [`job.actionErrors.recover`](recovering)). After every step completes, and before moving on, the processor calls BullMQ's `job.updateData(...)` to persist that position, including the merged result of the step that just ran.
 
 When a worker picks up a job, whether for the first time or as a BullMQ retry, it reads `job.data.step`. If it's unset, the job starts at the first declared step. If it's set (because a previous attempt got partway through), the job resumes from that exact step, with `job.data` already containing everything every prior step produced.
 
@@ -79,6 +79,8 @@ Because a step can run more than once (its own retries, or a worker restart mid-
 ## What is *not* automatically retried
 
 A handler that throws one of `job.actionErrors` (`skip`, `skipToFinal`, `earlyExit`) is not a failure: those are control-flow signals the processor handles itself, not something BullMQ retries. See [Errors, Control Flow & Rollbacks](errors). Only an error that reaches BullMQ as a job failure triggers a retry (subject to `attempts`), and rollbacks for every completed step run first, in reverse order, before the error is re-thrown.
+
+`job.actionErrors.recover` is similar but not identical: while it's waiting on its fix job, the job is parked in BullMQ's `WaitingChildren` state, not failed, so it doesn't consume an `attempts` retry either. It only becomes a real, rollback-triggering failure if the step exceeds its own `maxAttempts`. See [Recovering From a Failure](recovering).
 
 ## Limits
 

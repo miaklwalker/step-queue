@@ -80,3 +80,7 @@ A `childQueue` step can declare `rollback` and `rollbackKeys` the same way a pla
 ## Producing child jobs from a non-worker process
 
 If the process enqueuing child jobs shouldn't itself run a worker — an API route, a script — use `QueueOnly` instead of `QueueSystem` for the child queue's producer side. See [Producer-Only Queues](../reference/queue-only).
+
+## Waiting on a child job to fix a failure
+
+The same waiting mechanism also powers `job.actionErrors.recover`, which adds a child job from inside a `catch` block and retries the *same* step once it finishes, instead of a normal step's handler moving on to `nextStep`. See [Recovering From a Failure](recovering).

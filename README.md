@@ -256,9 +256,10 @@ have a next step, and no step may be added after it.
 
 If `addFinalStep` is never called, one is inserted automatically. Its result is
 the accumulated job data with Step Queue's own bookkeeping keys (`step`,
-`previousStep`, `consumedKeys`, `completedSteps`) stripped out — so the queue's
-output type matches whatever the last declared step produced, without those
-internal fields leaking into it.
+`previousStep`, `consumedKeys`, `completedSteps`, `recoverStep`,
+`recoverAttempts`) stripped out — so the queue's output type matches whatever
+the last declared step produced, without those internal fields leaking into
+it.
 
 ### The `clean` feature
 
@@ -362,6 +363,7 @@ available on every `TypedJob`.
 | Skip ahead to a named step | `throw new job.actionErrors.skip(stepName, result?)` | Jumps directly to `stepName`, merging `result` into the job data first. Any steps between the current one and the target are not run. |
 | Skip straight to the final step | `throw new job.actionErrors.skipToFinal(null, result?)` | Jumps to the final step regardless of what comes next in the declared order. |
 | Exit early with a value | `throw new job.actionErrors.earlyExit(value)` | Ends the processor immediately; `value` becomes the job's result, bypassing every later step (including the final step). |
+| Recover with a fix job | `throw new job.actionErrors.recover(childQueue, childData, options?)` | Adds `childQueue` as a child job, pauses this job until it finishes, then retries this same step. Gives up after `options.maxAttempts` (default `3`) and fails the job. See [Recovering from a failure](#recovering-from-a-failure-fix-jobs) below. |
 
 
 ```ts
@@ -630,6 +632,72 @@ step is never double-processed if the worker restarts mid-wait.
 
 ---
 
+## Recovering from a failure (fix jobs)
+
+Some failures are really just an unmet precondition with a job that fixes it —
+a brand that hasn't been imported into a channel yet, say. Catch that specific
+error in a step's handler and throw `job.actionErrors.recover(childQueue,
+childData, options?)` instead of failing outright: the processor adds
+`childQueue` as a child job, pauses this job the same way a `childQueue` step
+does, and retries this exact step once the child completes. No `QueueEvents`
+listener required, and the fix lives right next to the code that produces the
+error instead of in a separate handler that has to re-derive what went wrong.
+
+```ts
+const importBrandQueue = new QueueSystem(NameFactory({ name: "importBrand" }))
+	.defineInputSchema(z.object({ brandId: z.string(), channel: z.string() }))
+	.defineConnection(connection)
+	.defineProcessor((step) =>
+		step.addStep({
+			name: "import",
+			handler: async (job) => {
+				await importBrand(job.data.brandId, job.data.channel);
+			},
+		}),
+	);
+
+const pushToChannel = new QueueSystem(NameFactory({ name: "pushToChannel" }))
+	.defineInputSchema(z.object({ brandId: z.string(), channel: z.string() }))
+	.defineConnection(connection)
+	.defineProcessor((step) =>
+		step
+			.addStep({
+				name: "push",
+				handler: async (job) => {
+					try {
+						return await pushToChannelApi(job.data);
+					} catch (err) {
+						if (isBrandMissingError(err)) {
+							throw new job.actionErrors.recover(importBrandQueue, {
+								brandId: job.data.brandId,
+								channel: job.data.channel,
+							});
+						}
+						throw err; // anything else fails the step normally
+					}
+				},
+			})
+			.addFinalStep({ handler: async () => ({ pushed: true }) }),
+	);
+```
+
+`childData` is checked at compile time against `childQueue`'s own input
+schema, inferred from `childQueue` itself — the same guarantee
+`childQueue.addChildJob(job, data)` gives an ordinary child step.
+
+Recovering reuses the same `moveToWaitingChildren` / `WaitingChildrenError`
+mechanism as a `childQueue` step, so BullMQ never sees a `'failed'` event and
+the job's `attempts` budget isn't spent while it waits. Each step tracks its
+own recovery attempts; exceeding `options.maxAttempts` (default `3`) runs
+rollbacks and fails the job with `RecoverAttemptsExceededError`, so a fix that
+doesn't actually resolve the problem can't loop forever. A recovery child's
+result isn't merged into the job data — it's treated as a side effect, not a
+data source, so the retried step should re-derive anything it needs rather
+than reading the child's output. See
+[Recovering From a Failure](docs/guides/recovering.md) for the full guide.
+
+---
+
 ## Producers-only queues
 
 A process that should only enqueue jobs — an API route, a script, a cron job —
@@ -787,12 +855,14 @@ from its input.
 
 The processor tracks its own position in the job data using a few reserved
 keys: `step` (the current step name), `previousStep`, `consumedKeys` (child
-results already collected), and `completedSteps` (for rollback ordering).
+results already collected), `completedSteps` (for rollback ordering), and
+`recoverStep` / `recoverAttempts` (used by `job.actionErrors.recover`).
 These are written to `job.data` at runtime so a job can resume correctly after
 a worker restart, but they are stripped from the result of an implicit final
 step and should not be relied on by handler code — a step name accidentally
-matching one of `"step"`, `"previousStep"`, `"consumedKeys"`, or
-`"completedSteps"` would collide with them.
+matching one of `"step"`, `"previousStep"`, `"consumedKeys"`,
+`"completedSteps"`, `"recoverStep"`, or `"recoverAttempts"` would collide with
+them.
 
 A processor is capped at 100 steps; exceeding that throws
 `ProcessorStepError` at job-run time as a guard against accidental infinite

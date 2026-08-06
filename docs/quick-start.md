@@ -68,3 +68,4 @@ await myQueue.close();
 - [Steps & Data Accumulation](guides/steps): how `addStep`, `addFinalStep`, and `clean` shape the accumulated type.
 - [Resuming After Failure](guides/resuming): what happens when a step throws and the job retries.
 - [Waiting on Child Jobs](guides/child-queues): fanning work out to another queue mid-pipeline.
+- [Recovering From a Failure](guides/recovering): fixing a step's failure with a child job instead of a `QueueEvents` listener.

@@ -95,3 +95,4 @@ A handler either returns an object, which is merged into the accumulated job dat
 - [Quick Start](quick-start): a complete worked job end to end.
 - [Steps & Data Accumulation](guides/steps): the mechanics of `addStep`, `addFinalStep`, and `clean`.
 - [Resuming After Failure](guides/resuming): how a retried job picks up where it left off.
+- [Recovering From a Failure](guides/recovering): fixing a step's failure with a child job instead of a `QueueEvents` listener.

@@ -2,9 +2,12 @@ import { type Job, WaitingChildrenError } from "bullmq";
 import { FINAL_STEP_NAME } from "./processorBuilder.ts";
 import {
 	actionErrors,
+	DEFAULT_RECOVER_MAX_ATTEMPTS,
 	EarlyExitError,
 	type ErrorRegistry,
 	ProcessorStepError,
+	RecoverAttemptsExceededError,
+	RecoverWithChildError,
 	SkipStepError,
 	SkipToFinalError,
 	type StepConfig,
@@ -68,6 +71,7 @@ export function createJobProxy<TInput, TErrors extends ErrorRegistry>(
 
 const MAX_STEP_COUNT = 100;
 const WAIT_CHILDREN = "__WAIT_CHILDREN__";
+const WAIT_RECOVER_CHILDREN = "__WAIT_RECOVER_CHILDREN__";
 const STEP_PROCESSOR_HEADER = () => `[StepProcessor]`;
 
 async function executeRollbacks(
@@ -142,6 +146,8 @@ export function StepProcessor<TInput, TResult>(
 			previousStep?: StepNames;
 			consumedKeys?: string[];
 			completedSteps?: StepNames[];
+			recoverStep?: StepNames;
+			recoverAttempts?: Record<string, number>;
 			[key: ResultsName]: unknown;
 		} = {
 			step: undefined as StepNames | undefined,
@@ -233,6 +239,34 @@ export function StepProcessor<TInput, TResult>(
 				await job.updateData(jobData as TInput);
 				continue;
 			}
+			if (currentStep === WAIT_RECOVER_CHILDREN) {
+				if (!token) {
+					throw new ProcessorStepError(
+						"Missing token for waiting on a recovery child",
+					);
+				}
+				const resumeStep = jobData.recoverStep;
+				if (!resumeStep) {
+					throw new ProcessorStepError(
+						"Invalid state: recoverStep is missing while waiting for a recovery child",
+					);
+				}
+				const shouldWait = await job.moveToWaitingChildren(token);
+				if (shouldWait) {
+					await stepLog(
+						`StepProcessor: Waiting on recovery job for step: ${String(resumeStep)}`,
+					);
+					throw new WaitingChildrenError();
+				}
+				await stepLog(
+					`StepProcessor: Recovery job(s) completed for step: ${String(resumeStep)} — retrying`,
+				);
+				currentStep = resumeStep;
+				jobData.step = currentStep;
+				jobData.recoverStep = undefined;
+				await job.updateData(jobData as TInput);
+				continue;
+			}
 			const stepConfig = processorConfig.steps[currentStep];
 			if (!stepConfig) {
 				throw new ProcessorStepError(
@@ -252,6 +286,7 @@ export function StepProcessor<TInput, TResult>(
 			let skipOccurred = false;
 			let skipTarget: StepNames | null = null;
 			let earlyExit = false;
+			let recovering = false;
 			await job.updateProgress({ step: stepConfig.name, progress: 0 });
 			const result = await stepConfig
 				.handler(jobProxy, token ?? "")
@@ -273,12 +308,46 @@ export function StepProcessor<TInput, TResult>(
 					if (!token) {
 						throw new Error("Missing token for next step");
 					}
+					if (err instanceof RecoverWithChildError) {
+						const maxAttempts =
+							err.options?.maxAttempts ?? DEFAULT_RECOVER_MAX_ATTEMPTS;
+						const recoverAttempts = { ...(jobData.recoverAttempts ?? {}) };
+						const attempts = (recoverAttempts[String(currentStep)] ?? 0) + 1;
+						if (attempts > maxAttempts) {
+							await executeRollbacks(job, jobProxy, token, processorConfig);
+							throw new RecoverAttemptsExceededError(
+								String(currentStep),
+								maxAttempts,
+							);
+						}
+						recoverAttempts[String(currentStep)] = attempts;
+						jobData.recoverAttempts = recoverAttempts;
+						jobData.recoverStep = currentStep;
+						jobData.step = WAIT_RECOVER_CHILDREN as StepNames;
+						await job.updateData(jobData as TInput);
+						await err.childQueue.addChildJob(job, err.childData);
+						const shouldWait = await job.moveToWaitingChildren(token);
+						if (shouldWait) {
+							await stepLog(
+								`StepProcessor: Recovering step "${String(currentStep)}" via ${err.childQueue.name} (attempt ${attempts}/${maxAttempts})`,
+							);
+							throw new WaitingChildrenError();
+						}
+						recovering = true;
+						return undefined;
+					}
 					await executeRollbacks(job, jobProxy, token, processorConfig);
 					throw err;
 				});
 
 			if (earlyExit) {
 				return result as TResult;
+			}
+			if (recovering) {
+				currentStep = jobData.recoverStep as StepNames;
+				jobData.step = currentStep;
+				await job.updateData(jobData as TInput);
+				continue;
 			}
 			if (result && typeof result === "object" && stepConfig.type !== "final") {
 				jobData = {

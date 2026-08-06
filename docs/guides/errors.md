@@ -14,6 +14,7 @@ A handler controls what happens next by throwing one of `job.actionErrors`, avai
 | Skip ahead to a named step | `throw new job.actionErrors.skip(stepName, result?)` | Jumps directly to `stepName`, merging `result` into the job data first. Any steps between the current one and the target are not run. |
 | Skip straight to the final step | `throw new job.actionErrors.skipToFinal(null, result?)` | Jumps to the final step regardless of what comes next in the declared order. |
 | Exit early with a value | `throw new job.actionErrors.earlyExit(value)` | Ends the processor immediately; `value` becomes the job's result, bypassing every later step (including the final step). |
+| Recover with a fix job | `throw new job.actionErrors.recover(childQueue, childData, options?)` | Adds `childQueue` as a child job, pauses this job until it finishes, then retries this same step. Gives up after `options.maxAttempts` (default `3`). See [Recovering From a Failure](recovering). |
 
 ```ts
 const signup = new QueueSystem(NameFactory({ name: "signup", env: "example" }))
@@ -60,7 +61,7 @@ const signup = new QueueSystem(NameFactory({ name: "signup", env: "example" }))
   );
 ```
 
-None of these three are treated as a job failure: BullMQ never sees them as an error and never retries because of them.
+None of these are treated as a job failure while the processor is handling them: BullMQ never sees `skip`, `skipToFinal`, or `earlyExit` as an error, and `recover` only fails the job if it exceeds its `maxAttempts` — see [Recovering From a Failure](recovering) for the full mechanics (it reuses the same `moveToWaitingChildren` machinery as a `childQueue` step).
 
 ## Typed errors
 
