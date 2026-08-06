@@ -1,0 +1,32 @@
+{
+  "sections": [
+    {
+      "label": "Getting Started",
+      "children": [
+        { "label": "Overview", "to": "overview" },
+        { "label": "Installation", "to": "installation" },
+        { "label": "Quick Start", "to": "quick-start" }
+      ]
+    },
+    {
+      "label": "Guides",
+      "children": [
+        { "label": "Steps & Data Accumulation", "to": "guides/steps" },
+        { "label": "Resuming After Failure", "to": "guides/resuming" },
+        { "label": "Errors, Control Flow & Rollbacks", "to": "guides/errors" },
+        { "label": "Waiting on Child Jobs", "to": "guides/child-queues" },
+        { "label": "Workers, Concurrency & Progress", "to": "guides/workers" },
+        { "label": "Typed Input & Schema Validation", "to": "guides/schema-validation" }
+      ]
+    },
+    {
+      "label": "Reference",
+      "children": [
+        { "label": "QueueSystem", "to": "reference/queue-system" },
+        { "label": "QueueOnly", "to": "reference/queue-only" },
+        { "label": "ProcessorBuilder", "to": "reference/processor-builder" },
+        { "label": "NameFactory", "to": "reference/name-factory" }
+      ]
+    }
+  ]
+}
