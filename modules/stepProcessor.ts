@@ -261,6 +261,21 @@ export function StepProcessor<TInput, TResult>(
 				await stepLog(
 					`StepProcessor: Recovery job(s) completed for step: ${String(resumeStep)} — retrying`,
 				);
+
+				// `getChildrenValues()` is cumulative over the whole job, not scoped
+				// to this wait — mark the recovery child's key(s) consumed so they
+				// can never be picked up (and merged into `<name>-results`) by a
+				// later `childQueue` step's own WAIT_CHILDREN pass. The value itself
+				// is discarded: a recovery child is a side effect, not a data source.
+				const consumedKeys = jobData.consumedKeys ?? [];
+				const childrenJobValues = await job.getChildrenValues<unknown>();
+				const unconsumedKeys = Object.keys(childrenJobValues).filter(
+					(key) => !consumedKeys.includes(key),
+				);
+				if (unconsumedKeys.length > 0) {
+					jobData.consumedKeys = [...consumedKeys, ...unconsumedKeys];
+				}
+
 				currentStep = resumeStep;
 				jobData.step = currentStep;
 				jobData.recoverStep = undefined;
@@ -344,9 +359,11 @@ export function StepProcessor<TInput, TResult>(
 				return result as TResult;
 			}
 			if (recovering) {
-				currentStep = jobData.recoverStep as StepNames;
-				jobData.step = currentStep;
-				await job.updateData(jobData as TInput);
+				// The child already finished by the time we checked (rare, but
+				// possible) — jobData.step is already WAIT_RECOVER_CHILDREN and
+				// persisted; loop back through that branch so the child-value
+				// bookkeeping above runs from a single place.
+				currentStep = WAIT_RECOVER_CHILDREN as StepNames;
 				continue;
 			}
 			if (result && typeof result === "object" && stepConfig.type !== "final") {
