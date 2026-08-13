@@ -68,9 +68,32 @@ importer.addWorkerEventListener("failed", (job, err) => {
 
 `addWorkerEventListener` throws if called before `defineProcessor` has created the worker.
 
+## `progress.steps`: per-step status for free
+
+Every job's BullMQ progress carries a `steps` object, maintained automatically — no configuration needed. Each key is a step's name; each value is one of:
+
+- `"not_started"` — the step hasn't run yet
+- `"running"` — the step's handler is currently executing (or, for a step with a `childQueue`, waiting on its children)
+- `"Finished in <N>ms"` — the step completed successfully
+- `"Skipped after <N>ms"` — `job.actionErrors.skip`/`skipToFinal` bypassed it
+- `"Failed after <N>ms"` — the handler threw and the job is failing
+- `"Recovering (attempt <n>/<max>)"` — a `RecoverWithChildError` child job is in flight for this step
+
+The final step (implicit or explicit) is reported under the key `"final"`.
+
+```ts
+const job = await importer.addJob({ rows: 100 });
+// while it's running:
+const inFlight = await importer.queue.getJob(job.id);
+inFlight?.progress;
+// { step: "import", progress: 0, steps: { import: "running", final: "not_started" } }
+```
+
+This survives a job pausing in `waiting-children` or recovering via a child job: the status and elapsed time recorded before the pause are read back from the job's persisted progress and carried forward, not reset.
+
 ## Reporting progress from a step
 
-There are two independent ways to surface progress from a step:
+There are two other, independent ways to surface progress from a step:
 
 - `job.updateStepProgress({...})`, called from inside a handler, merges custom data into the job's BullMQ progress and emits a `"progress"` event on the worker.
 - A `progressReport` callback on a step, invoked automatically at `"start"`, `"finish"`, `"skip"`, and (for a step with a `childQueue`) `"child-finish"`, useful for logging or pushing updates without cluttering the handler itself.

@@ -529,7 +529,28 @@ ProcessorBuilder.init<{ a: number; b: string }>()
 
 ## Progress reporting
 
-There are two independent ways to surface progress from a step:
+### `progress.steps`: per-step status for free
+
+Every job's BullMQ progress carries a `steps` object, maintained automatically
+— no configuration needed. Each key is a step's name; each value is one of
+`"not_started"`, `"running"`, `"Finished in <N>ms"`, `"Skipped after <N>ms"`,
+`"Failed after <N>ms"`, or `"Recovering (attempt <n>/<max>)"`. The final step
+is reported under the key `"final"`.
+
+```ts
+const job = await importer.addJob({ rows: 100 });
+const inFlight = await importer.queue.getJob(job.id);
+inFlight?.progress;
+// { step: "import", progress: 0, steps: { import: "running", final: "not_started" } }
+```
+
+This survives a job pausing in `waiting-children` or recovering via a child
+job — the status and elapsed time recorded before the pause are read back
+from the job's persisted progress and carried forward, not reset.
+
+### Reporting progress yourself
+
+There are two other, independent ways to surface progress from a step:
 
 - `job.updateStepProgress({...})`, called from inside a handler, merges custom
   data into the job's BullMQ progress and emits a `"progress"` event on the

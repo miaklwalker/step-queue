@@ -74,6 +74,18 @@ const WAIT_CHILDREN = "__WAIT_CHILDREN__";
 const WAIT_RECOVER_CHILDREN = "__WAIT_RECOVER_CHILDREN__";
 const STEP_PROCESSOR_HEADER = () => `[StepProcessor]`;
 
+const STEPS_PROGRESS_KEY = "steps";
+const STEP_TIMINGS_KEY = "__stepTimings__";
+const FINAL_STEP_DISPLAY_NAME = "final";
+
+/** Reads `job.progress` as a plain object, or `{}` if it isn't one yet. */
+function readProgressObject(job: Job): Record<string, unknown> {
+	const current = job.progress;
+	return current && typeof current === "object" && !Array.isArray(current)
+		? (current as Record<string, unknown>)
+		: {};
+}
+
 async function executeRollbacks(
 	job: Job,
 	jobProxy: TypedJob<unknown>,
@@ -161,6 +173,44 @@ export function StepProcessor<TInput, TResult>(
 		await stepLog(`Starting Step: ${String(currentStep)}`);
 		let previousStep: StepNames | null = jobData?.previousStep ?? null;
 
+		// `steps`/timings survive resumes (WAIT_CHILDREN, WAIT_RECOVER_CHILDREN)
+		// because they're re-read from job.progress, which is persisted in Redis
+		// across the separate processor invocations a resume triggers.
+		const initialProgress = readProgressObject(job);
+		const stepsState: Record<string, string> = {
+			...(initialProgress[STEPS_PROGRESS_KEY] as
+				| Record<string, string>
+				| undefined),
+		};
+		const stepTimings: Record<string, number> = {
+			...(initialProgress[STEP_TIMINGS_KEY] as
+				| Record<string, number>
+				| undefined),
+		};
+		for (const name of processorConfig.stepOrder) {
+			if (name === FINAL_STEP_NAME || name in stepsState) continue;
+			stepsState[name] = jobData.completedSteps?.includes(name as StepNames)
+				? "finished"
+				: "not_started";
+		}
+		const reportStep = async (
+			name: string,
+			status: string,
+			progress?: number,
+		) => {
+			stepsState[name] = status;
+			const patch: Record<string, unknown> = {
+				...readProgressObject(job),
+				step: name,
+				steps: { ...stepsState },
+				[STEP_TIMINGS_KEY]: { ...stepTimings },
+			};
+			if (progress !== undefined) {
+				patch.progress = progress;
+			}
+			await job.updateProgress(patch);
+		};
+
 		while (currentStep) {
 			if (currentStep === WAIT_CHILDREN) {
 				if (!token) {
@@ -191,6 +241,12 @@ export function StepProcessor<TInput, TResult>(
 					throw new WaitingChildrenError();
 				}
 				await stepLog(`StepProcessor: All Children Completed`);
+				const childrenElapsed =
+					Date.now() - (stepTimings[String(previousStep)] ?? Date.now());
+				await reportStep(
+					String(previousStep),
+					`Finished in ${childrenElapsed}ms`,
+				);
 				await stepConfig?.progressReport?.(
 					jobProxy,
 					token,
@@ -288,6 +344,12 @@ export function StepProcessor<TInput, TResult>(
 					`Step config not found for step ${String(currentStep)}`,
 				);
 			}
+			// Steps report under their own name, except the (internally-named)
+			// final step, which reports under the friendly key "final".
+			const stepDisplayName =
+				currentStep === FINAL_STEP_NAME
+					? FINAL_STEP_DISPLAY_NAME
+					: String(currentStep);
 			await stepLog(
 				`Starting Step: ${currentStep === FINAL_STEP_NAME ? "Final Step" : String(currentStep)}`,
 			);
@@ -302,7 +364,8 @@ export function StepProcessor<TInput, TResult>(
 			let skipTarget: StepNames | null = null;
 			let earlyExit = false;
 			let recovering = false;
-			await job.updateProgress({ step: stepConfig.name, progress: 0 });
+			stepTimings[String(currentStep)] = Date.now();
+			await reportStep(stepDisplayName, "running", 0);
 			const result = await stepConfig
 				.handler(jobProxy, token ?? "")
 				.catch(async (err: unknown) => {
@@ -330,6 +393,7 @@ export function StepProcessor<TInput, TResult>(
 						const attempts = (recoverAttempts[String(currentStep)] ?? 0) + 1;
 						if (attempts > maxAttempts) {
 							await executeRollbacks(job, jobProxy, token, processorConfig);
+							await reportStep(stepDisplayName, "Failed");
 							throw new RecoverAttemptsExceededError(
 								String(currentStep),
 								maxAttempts,
@@ -341,6 +405,10 @@ export function StepProcessor<TInput, TResult>(
 						jobData.step = WAIT_RECOVER_CHILDREN as StepNames;
 						await job.updateData(jobData as TInput);
 						await err.childQueue.addChildJob(job, err.childData);
+						await reportStep(
+							stepDisplayName,
+							`Recovering (attempt ${attempts}/${maxAttempts})`,
+						);
 						const shouldWait = await job.moveToWaitingChildren(token);
 						if (shouldWait) {
 							await stepLog(
@@ -352,6 +420,9 @@ export function StepProcessor<TInput, TResult>(
 						return undefined;
 					}
 					await executeRollbacks(job, jobProxy, token, processorConfig);
+					const elapsedFail =
+						Date.now() - (stepTimings[String(currentStep)] ?? Date.now());
+					await reportStep(stepDisplayName, `Failed after ${elapsedFail}ms`);
 					throw err;
 				});
 
@@ -404,11 +475,16 @@ export function StepProcessor<TInput, TResult>(
 				await stepLog(
 					`Finished Final Step: ${String(currentStep)}. Returning result.`,
 				);
-				await job.updateProgress({ step: stepConfig.name, progress: 100 });
+				const elapsedFinal =
+					Date.now() - (stepTimings[String(currentStep)] ?? Date.now());
+				await reportStep(stepDisplayName, `Finished in ${elapsedFinal}ms`, 100);
 				return result as TResult;
 			}
 
 			if (skipOccurred) {
+				const elapsedSkip =
+					Date.now() - (stepTimings[String(currentStep)] ?? Date.now());
+				await reportStep(stepDisplayName, `Skipped after ${elapsedSkip}ms`);
 				const nextStep = skipTarget ?? stepConfig.nextStep;
 				if (!nextStep) {
 					await stepLog(
@@ -433,6 +509,9 @@ export function StepProcessor<TInput, TResult>(
 				await job.updateData(jobData as TInput);
 				continue;
 			}
+			const elapsedFinish =
+				Date.now() - (stepTimings[String(currentStep)] ?? Date.now());
+			await reportStep(stepDisplayName, `Finished in ${elapsedFinish}ms`);
 			await stepConfig?.progressReport?.(
 				jobProxy,
 				token,
