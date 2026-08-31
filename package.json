@@ -1,6 +1,6 @@
 {
 	"name": "@michaelrwalker/step-queue",
-	"version": "0.4.1",
+	"version": "0.4.2",
 	"description": "An extremely type-safe, step-based wrapper around BullMQ.",
 	"homepage": "https://michaelrwalker.netlify.app/step-queue",
 	"type": "module",
