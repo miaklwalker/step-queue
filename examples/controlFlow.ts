@@ -11,11 +11,17 @@ const signup = new QueueSystem(NameFactory({ name: "signup", env: "example" }))
 	.defineConnection(connection)
 	.defineProcessor((step) =>
 		step
+			.errors({
+				NO_VALID_USER: "There is no valid user"
+			})
 			.addStep({
 				name: "validate",
 				handler: async (job) => {
 					if (!job.data.email.includes("@")) {
 						// bail out of the entire job with our own result shape
+						if(!job.data.email.includes('.')){
+							throw job.errors.NO_VALID_USER;
+						}
 						throw new job.actionErrors.earlyExit({
 							status: "rejected",
 							reason: "invalid email",

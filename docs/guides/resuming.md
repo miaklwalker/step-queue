@@ -19,8 +19,8 @@ Every job added through `addJob` / `addBulkJobs` picks up these defaults unless 
 
 ```ts
 {
-  removeOnComplete: { age: 60 * 60 * 24, count: 1000 }, // 1 day, capped at 1000
-  removeOnFail: { age: 60 * 60 * 24 * 7 },               // 7 days
+  removeOnComplete: { count: 1000 },
+  removeOnFail: { count: 3000 },
   attempts: 1,
 }
 ```
@@ -30,6 +30,19 @@ Every job added through `addJob` / `addBulkJobs` picks up these defaults unless 
 ```ts
 await myQueue.addJob({ email: "user@example.com" }, { attempts: 5 });
 ```
+
+To change these defaults project-wide instead of per call, add a `stepqueue.config.ts` next to `package.json`:
+
+```ts
+import { defineQueueDefaults } from "@michaelrwalker/step-queue";
+
+export default defineQueueDefaults({
+  removeOnComplete: { count: 5000 },
+  attempts: 3,
+});
+```
+
+(`stepqueue.config.js`/`.mjs`/`.cjs`, or a `"stepQueueDefaults"` field in `package.json`, work the same way — the config file takes priority if both exist.) It's read once per process and cached, so it adds no overhead beyond the first `addJob`/`addBulkJobs` call.
 
 Because the processor persists its position in the job data on every step transition, a retried job resumes from the step that failed rather than restarting from its input.
 

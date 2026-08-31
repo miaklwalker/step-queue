@@ -1,3 +1,4 @@
+export * from "./config.ts";
 export * from "./const.ts";
 export * from "./nameFactory.ts";
 export * from "./processorBuilder.ts";

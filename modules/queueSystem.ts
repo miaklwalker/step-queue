@@ -13,6 +13,7 @@ import {
 	Worker,
 	type WorkerListener,
 } from "bullmq";
+import { resolveQueueDefaults } from "./config.ts";
 import { DEFAULT_JOB_OPTIONS } from "./const.ts";
 import { ProcessorBuilder } from "./processorBuilder.ts";
 import {
@@ -292,20 +293,23 @@ export class QueueSystem<
 
 	async addJob(jobData: TInput, options?: JobsOptions) {
 		const queue = this._requireQueue();
+		const configDefaults = await resolveQueueDefaults();
 		return await queue.add(this.name, await this._validate(jobData), {
 			...DEFAULT_JOB_OPTIONS,
+			...configDefaults,
 			...options,
 		});
 	}
 
 	async addBulkJobs(jobs: Array<{ data: TInput; opts?: JobsOptions }>) {
 		const queue = this._requireQueue();
+		const configDefaults = await resolveQueueDefaults();
 		return await queue.addBulk(
 			await Promise.all(
 				jobs.map(async (job) => ({
 					name: this.name,
 					data: await this._validate(job.data),
-					opts: { ...DEFAULT_JOB_OPTIONS, ...job.opts },
+					opts: { ...DEFAULT_JOB_OPTIONS, ...configDefaults, ...job.opts },
 				})),
 			),
 		);
@@ -322,7 +326,6 @@ export class QueueSystem<
 			);
 		}
 		return await this.addJob(jobData, {
-			...DEFAULT_JOB_OPTIONS,
 			...options,
 			parent: {
 				id: parentJob.id,

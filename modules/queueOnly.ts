@@ -1,12 +1,13 @@
 import {
+	type ConnectionOptions,
 	type Job,
 	type JobsOptions,
 	Queue,
 	QueueEvents,
-	type ConnectionOptions,
 } from "bullmq";
-import type { TypedJob, JSONLike, ErrorRegistry } from "./types.ts";
+import { resolveQueueDefaults } from "./config.ts";
 import { DEFAULT_JOB_OPTIONS } from "./const.ts";
+import type { ErrorRegistry, JSONLike, TypedJob } from "./types.ts";
 
 /**
  * A queue-only counterpart to {@link QueueSystem} — adds jobs without starting a
@@ -46,18 +47,21 @@ export class QueueOnly<
 	}
 
 	async addJob(jobData: TInput, options?: JobsOptions) {
+		const configDefaults = await resolveQueueDefaults();
 		return await this.queue.add(this.name, jobData, {
 			...DEFAULT_JOB_OPTIONS,
+			...configDefaults,
 			...options,
 		});
 	}
 
 	async addBulkJobs(jobs: Array<{ data: TInput; opts?: JobsOptions }>) {
+		const configDefaults = await resolveQueueDefaults();
 		return await this.queue.addBulk(
 			jobs.map((job) => ({
 				name: this.name,
 				data: job.data,
-				opts: { ...DEFAULT_JOB_OPTIONS, ...job.opts },
+				opts: { ...DEFAULT_JOB_OPTIONS, ...configDefaults, ...job.opts },
 			})),
 		);
 	}
