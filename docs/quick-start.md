@@ -67,5 +67,6 @@ await myQueue.close();
 
 - [Steps & Data Accumulation](guides/steps): how `addStep`, `addFinalStep`, and `clean` shape the accumulated type.
 - [Resuming After Failure](guides/resuming): what happens when a step throws and the job retries.
-- [Waiting on Child Jobs](guides/child-queues): fanning work out to another queue mid-pipeline.
+- [Waiting on Child Jobs](guides/child-queues): fanning work out to another queue mid-pipeline, or to several queues in parallel.
+- [Simple Handler Queues](guides/handlers): a queue processed by one plain function, for commands where steps don't make sense.
 - [Recovering From a Failure](guides/recovering): fixing a step's failure with a child job instead of a `QueueEvents` listener.

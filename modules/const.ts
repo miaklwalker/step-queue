@@ -7,5 +7,5 @@ import type { JobsOptions } from "bullmq";
 export const DEFAULT_JOB_OPTIONS: JobsOptions = {
 	removeOnComplete: { count: 1000 },
 	removeOnFail: { count: 3000 },
-	attempts: 1,
+	attempts: 3,
 };

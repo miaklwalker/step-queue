@@ -3,17 +3,19 @@ title: "QueueSystem"
 description: "Full API reference for QueueSystem, the fluent builder that owns a BullMQ Queue and Worker."
 ---
 
-`QueueSystem` is the fluent builder that owns a BullMQ `Queue` and `Worker`. It enqueues jobs and defines the steps that process them.
+`QueueSystem` is the fluent builder that owns a BullMQ `Queue` and `Worker`. It enqueues jobs, and either defines the steps that process them (`defineProcessor`) or processes them with one plain function (`defineHandler`).
 
 ```ts
 class QueueSystem<
   TInput extends JSONLike = JSONLike,
-  TOutput extends JSONLike = JSONLike,
+  TOutput = JSONLike,
   TName extends string = string,
   TConnected extends boolean = boolean,
   TStarted extends boolean = boolean,
 >
 ```
+
+`TOutput` is unconstrained: a step processor always produces an object, but a `defineHandler` queue's output is whatever its handler returns.
 
 ## Constructor
 
@@ -43,7 +45,7 @@ defineConnection(
 ): QueueSystem<TInput, TOutput, TName, true, TStarted>
 ```
 
-Sets the BullMQ `ConnectionOptions` (Redis). Required before `defineProcessor`. Narrows `queue` from `Queue | undefined` to `Queue`.
+Sets the BullMQ `ConnectionOptions` (Redis). Required before `defineProcessor` or `defineHandler`. Narrows `queue` from `Queue | undefined` to `Queue`.
 
 ### `defineConcurrency(n)`
 
@@ -51,7 +53,7 @@ Sets the BullMQ `ConnectionOptions` (Redis). Required before `defineProcessor`. 
 defineConcurrency(concurrency: number): this
 ```
 
-Sets worker concurrency. Defaults to `1`. Must be set before `defineProcessor`, since that's when the `Worker` is constructed.
+Sets worker concurrency. Defaults to `1`. Must be set before `defineProcessor` or `defineHandler`, since that's when the `Worker` is constructed.
 
 ### `defineProcessor(buildOrBuilder)`
 
@@ -70,6 +72,32 @@ defineProcessor<TNewInput extends TInput, TNewOutput extends JSONLike>(
 ```
 
 Declares steps and starts the `Queue` + `Worker`. Takes either a callback receiving a typed `ProcessorBuilder`, or a standalone `ProcessorBuilder` instance (un-built, via `ProcessorBuilder.init<T>()`). Requires a connected system: calling it before `defineConnection` is a compile error via the `this` parameter, with a matching runtime guard (`defineConnection(...) must be called before defineProcessor(...)`) for callers that bypass the type check. Narrows `queue` and `worker` to non-optional. See [ProcessorBuilder reference](processor-builder).
+
+### `defineHandler(handler)`
+
+```ts
+defineHandler<TNewOutput>(
+  this: QueueSystem<TInput, TOutput, TName, true, TStarted>,
+  handler: (job: Job<TInput, unknown, TName>, token?: string) => Promise<TNewOutput>,
+): QueueSystem<TInput, TNewOutput, TName, true, true>;
+```
+
+The step-less alternative to `defineProcessor`: starts the `Worker` with a plain function, exactly like handing a processor to a raw BullMQ `Worker`. Use it for simple command queues (an API call, a webhook, an email) where steps don't make sense but you still want the queue's visibility, retries and typed input.
+
+- `job` is a plain BullMQ `Job` with `data` typed from `defineInputSchema`, not a `TypedJob`: there is no `errors` registry, no `actionErrors`, no `updateStepProgress`, and no rollbacks, since there are no steps.
+- The queue's output type (`QueueOutput<typeof queue>`) is exactly what the handler resolves to. Unlike a step processor, it doesn't have to be an object: a string, number, array, or `void` all work.
+- A thrown error fails the job like any BullMQ processor; a retry re-runs the whole handler.
+- A `defineHandler` queue can be a `childQueue` (or an entry in `childQueues`) like any other, and its return type flows into `<step>-results`.
+- It has the same connection requirement (`this` parameter plus runtime guard: `defineConnection(...) must be called before defineHandler(...)`) and the same narrowing of `queue` and `worker` as `defineProcessor`.
+
+Call either `defineProcessor` or `defineHandler`, not both: each one starts a worker. See [Simple Handler Queues](../guides/handlers).
+
+```ts
+const sendEmail = new QueueSystem(NameFactory({ name: "sendEmail" }))
+  .defineInputSchema(z.object({ to: z.string() }))
+  .defineConnection(connection)
+  .defineHandler(async (job) => mailer.send(job.data.to));
+```
 
 ### `addDescription(text)` / `addToSystem(text)`
 
@@ -155,7 +183,7 @@ Gracefully closes the worker, queue, and queue events.
 | `description` | `string \| undefined` | Set via `addDescription`. |
 | `jsonSchema` | `Record<string, unknown> \| undefined` | Populated by `defineInputSchema` when the schema vendor supports JSON Schema conversion. |
 | `queue` | `Queue \| undefined`, narrows to `Queue` after `defineConnection` | The underlying BullMQ queue, created on first access once a connection has been defined. |
-| `worker` | `Worker \| undefined`, narrows to `Worker` after `defineProcessor` | The underlying BullMQ worker. |
+| `worker` | `Worker \| undefined`, narrows to `Worker` after `defineProcessor` or `defineHandler` | The underlying BullMQ worker. |
 | `QueueEvents` | `QueueEvents` (getter) | Lazily-created `QueueEvents` instance, needed by `job.waitUntilFinished(queue.QueueEvents, timeout)`. Throws if accessed before `defineConnection`. |
 
 ## Lifecycle narrowing
@@ -187,7 +215,7 @@ function enqueueOnly<In extends JSONLike>(q: QueueSystem<In, JSONLike, string, t
 }
 ```
 
-The same mechanism enforces call order. `defineProcessor` declares a `this` parameter requiring a connected system, so getting the order wrong fails to compile rather than throwing at startup:
+The same mechanism enforces call order. `defineProcessor` and `defineHandler` both declare a `this` parameter requiring a connected system, so getting the order wrong fails to compile rather than throwing at startup:
 
 ```ts
 new QueueSystem(NameFactory({ name: "MyCoolQueue" })).defineProcessor((step) =>

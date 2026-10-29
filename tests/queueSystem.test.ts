@@ -88,6 +88,16 @@ describe("QueueSystem builder (no connection needed)", () => {
 		);
 	});
 
+	test("defineHandler without a connection is a type error, and throws", () => {
+		const q = new QueueSystem(NameFactory({ name: "Q" }));
+		assert.throws(
+			() =>
+				// @ts-expect-error - `this` requires a connected system
+				q.defineHandler(async () => "ok"),
+			/defineConnection/,
+		);
+	});
+
 	test("addJob throws before the queue is initialized", async () => {
 		const q = new QueueSystem(NameFactory({ name: "Q" })).defineInputSchema(
 			z.object({ greeting: z.string() }),
@@ -201,6 +211,85 @@ describe("QueueSystem (end-to-end via BullMQ)", () => {
 
 		const out = await runToCompletion(queue, { greeting: "hey" });
 		assert.deepStrictEqual(out, { done: "HEY" });
+	});
+
+	test("starting a second worker on the same queue throws", () => {
+		const queue = track(
+			new QueueSystem(NameFactory({ name: uniqueName("twice") }))
+				.defineConnection(connection)
+				.defineProcessor((step) =>
+					step.addStep({ name: "s", handler: async () => ({}) }),
+				),
+		);
+		assert.throws(
+			() => queue.defineHandler(async () => "again"),
+			/already has a worker/,
+		);
+		assert.throws(
+			() =>
+				queue.defineProcessor((step) =>
+					step.addStep({ name: "s", handler: async () => ({}) }),
+				),
+			/already has a worker/,
+		);
+	});
+
+	test("processes a job with a plain defineHandler", async () => {
+		const queue = track(
+			new QueueSystem(NameFactory({ name: uniqueName("handler") }))
+				.defineInputSchema(z.object({ greeting: z.string() }))
+				.defineConnection(connection)
+				.defineHandler(async (job) => {
+					type _In = Expect<Equal<typeof job.data.greeting, string>>;
+					return job.data.greeting.toUpperCase();
+				}),
+		);
+
+		// The output is exactly what the handler returns — not limited to objects.
+		type Out = QueueOutput<typeof queue>;
+		type _ = Expect<Equal<Out, string>>;
+		assert.ok(queue.worker);
+
+		const out = await runToCompletion(queue, { greeting: "hi" });
+		assert.strictEqual(out, "HI");
+	});
+
+	test("a defineHandler queue works as a typed child queue", async () => {
+		const child = track(
+			new QueueSystem(NameFactory({ name: uniqueName("handlerChild") }))
+				.defineInputSchema(z.object({ n: z.number() }))
+				.defineConnection(connection)
+				.defineHandler(async (job) => ({ doubled: job.data.n * 2 })),
+		);
+		const parent = track(
+			new QueueSystem(NameFactory({ name: uniqueName("handlerParent") }))
+				.defineInputSchema(z.object({ ns: z.array(z.number()) }))
+				.defineConnection(connection)
+				.defineProcessor((step) =>
+					step
+						.addStep({
+							name: "fan",
+							childQueue: child,
+							handler: async (job) => {
+								await child.addBulkChildJobs(
+									job,
+									job.data.ns.map((n) => ({ data: { n } })),
+								);
+							},
+						})
+						.addFinalStep({
+							handler: async (job) => ({
+								total: job.data["fan-results"].reduce(
+									(sum, r) => sum + r.doubled,
+									0,
+								),
+							}),
+						}),
+				),
+		);
+
+		const out = await runToCompletion(parent, { ns: [1, 2, 3] });
+		assert.deepStrictEqual(out, { total: 12 });
 	});
 
 	test("validates job input against the schema at enqueue time", async () => {
@@ -439,9 +528,11 @@ describe("processor action errors (control flow)", () => {
 		);
 
 		await assert.rejects(() => runToCompletion(queue, { start: "go" }), /boom/);
-		// "b" throws, so the final step never runs.
-		assert.deepStrictEqual(visited, ["a", "b"]);
-		// "a" completed, so its rollback fires with its requested keys.
+		// "b" throws on every attempt (3 by default), so the final step never
+		// runs. Each retry resumes on "b": "a" ran once and is never re-run.
+		assert.deepStrictEqual(visited, ["a", "b", "b", "b"]);
+		// Rollbacks wait for the final failure, so "a" rolls back exactly once,
+		// with its requested keys.
 		assert.deepStrictEqual(rolledBack, ["a:true"]);
 	});
 });

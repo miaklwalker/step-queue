@@ -46,6 +46,50 @@ type ChildResults<TChildQueue, TSingle extends boolean> = TSingle extends true
 	? QueueOutput<TChildQueue>
 	: QueueOutput<TChildQueue>[];
 
+/** A named set of child queues for a parallel child step. */
+export type AnyChildQueues = Record<string, AnyChildQueue>;
+
+/**
+ * A parallel child step's `singleChild`: `true` for every queue, or a record
+ * naming the queues that run exactly one child (e.g. `{ ebay: true }`).
+ */
+export type ParallelSingleChild<TChildQueues extends AnyChildQueues> =
+	| boolean
+	| { readonly [K in keyof TChildQueues]?: boolean };
+
+/**
+ * Whether `singleChild` marks queue `K` as single. Distributes over a
+ * non-literal `boolean`, so an unknown flag widens to both result shapes.
+ */
+type SingleFor<TSingle, K> = TSingle extends boolean
+	? TSingle
+	: K extends keyof TSingle
+		? TSingle[K] extends boolean
+			? TSingle[K]
+			: false
+		: false;
+
+/** One output (or `undefined` if none was added) when single, else an array. */
+type UnwrapIf<TFlag, TOutput> = TFlag extends true
+	? TOutput | undefined
+	: TOutput[];
+
+/**
+ * What a parallel child step's `processChildResult` receives — and what
+ * `<name>-results` holds without one: each child queue's outputs, grouped
+ * under the key it was given in `childQueues`. A queue marked single by
+ * `singleChild` holds its one output, or `undefined` if no job was added to it.
+ */
+type ParallelChildResults<
+	TChildQueues extends AnyChildQueues,
+	TSingle extends ParallelSingleChild<TChildQueues>,
+> = Prettify<{
+	[K in keyof TChildQueues]: UnwrapIf<
+		SingleFor<TSingle, K>,
+		QueueOutput<TChildQueues[K]>
+	>;
+}>;
+
 /** Job data after a child step: handler output merged in, plus `<name>-results`. */
 type ChildStepData<
 	TName extends string,
@@ -141,6 +185,50 @@ export type ChildStep<
 		stepName: string,
 		status: ProgressStatus,
 	) => void | Promise<void>;
+};
+
+export type ParallelChildStep<
+	TName extends string,
+	TInput,
+	TStepOutput,
+	TChildQueues extends AnyChildQueues,
+	TSingle extends ParallelSingleChild<TChildQueues>,
+	TChildResult,
+	TRollbackKeys extends readonly PropertyKey[],
+	TErrors extends ErrorRegistry,
+> = Omit<
+	ChildStep<
+		TName,
+		TInput,
+		TStepOutput,
+		AnyChildQueue,
+		false,
+		TChildResult,
+		TRollbackKeys,
+		TErrors
+	>,
+	"childQueue" | "singleChild" | "processChildResult"
+> & {
+	/**
+	 * The queues this step fans out to, run in parallel. The handler adds the
+	 * child jobs; results are grouped by these keys under `<name>-results`.
+	 */
+	childQueues: TChildQueues;
+	childQueue?: never;
+	/**
+	 * Queues that run at most one child job, whose output is stored unwrapped:
+	 * `true` for all of them, or a record such as `{ ebay: true }` for some.
+	 * Keys must name queues in `childQueues`.
+	 */
+	singleChild?: TSingle extends boolean
+		? TSingle
+		: TSingle & {
+				readonly [K in Exclude<keyof TSingle, keyof TChildQueues>]: never;
+			};
+	/** Map the grouped child outputs before storing them under `<name>-results`. */
+	processChildResult?: (
+		results: ParallelChildResults<TChildQueues, TSingle>,
+	) => TChildResult | Promise<TChildResult>;
 };
 
 /**
@@ -344,6 +432,41 @@ export class ProcessorBuilder<
 		TProtected | TRollbackKeys[number]
 	>;
 
+	// [parallel child step]
+	// Has `childQueues`: a record of queues the handler fans out to at once.
+	// Results are grouped by record key, each typed by its own queue's output,
+	// so later steps keep full type safety without running the queues one by one.
+	addStep<
+		TName extends string,
+		TStepOutput,
+		TChildQueues extends AnyChildQueues,
+		const TSingle extends ParallelSingleChild<TChildQueues> = false,
+		TChildResult = ParallelChildResults<TChildQueues, TSingle>,
+		const TRollbackKeys extends readonly PropertyKey[] = readonly [],
+		const TClean extends readonly PropertyKey[] = readonly [],
+	>(
+		stepConfig: ParallelChildStep<
+			TName,
+			TLastReturnType,
+			TStepOutput,
+			TChildQueues,
+			TSingle,
+			TChildResult,
+			TRollbackKeys,
+			TErrors
+		> &
+			CleanField<TLastReturnType, TProtected, TClean>,
+	): ProcessorBuilder<
+		TInitialData,
+		TCurrentData,
+		Cleaned<
+			ChildStepData<TName, TLastReturnType, TStepOutput, TChildResult>,
+			TClean[number]
+		>,
+		TErrors,
+		TProtected | TRollbackKeys[number]
+	>;
+
 	// [plain step]
 	// This step does not contain a child queue.
 	// Its return type is added to the job data and is visible in all future steps
@@ -369,8 +492,35 @@ export class ProcessorBuilder<
 
 	// biome-ignore lint/suspicious/noExplicitAny: <Overloaded add step will never it any condition>
 	addStep(stepConfig: any): any {
+		if (stepConfig.childQueue && stepConfig.childQueues) {
+			throw new AddStepError(
+				`Step "${stepConfig.name}" cannot have both childQueue and childQueues`,
+			);
+		}
+		if (stepConfig.childQueues) {
+			const names = Object.values(
+				stepConfig.childQueues as Record<string, AnyChildQueue>,
+			).map((queue) => queue.name);
+			const unknownSingles =
+				typeof stepConfig.singleChild === "object"
+					? Object.keys(stepConfig.singleChild).filter(
+							(key) => !Object.hasOwn(stepConfig.childQueues, key),
+						)
+					: [];
+			if (unknownSingles.length > 0) {
+				throw new AddStepError(
+					`Step "${stepConfig.name}" marks ${unknownSingles.join(", ")} as singleChild, but they are not in childQueues`,
+				);
+			}
+			const duplicates = names.filter((n, i) => names.indexOf(n) !== i);
+			if (duplicates.length > 0) {
+				throw new AddStepError(
+					`Step "${stepConfig.name}" lists queue(s) ${[...new Set(duplicates)].join(", ")} more than once in childQueues`,
+				);
+			}
+		}
 		return this._push({
-			hasChildren: !!stepConfig.childQueue,
+			hasChildren: !!stepConfig.childQueue || !!stepConfig.childQueues,
 			...stepConfig,
 			type: "regular" as const,
 		});

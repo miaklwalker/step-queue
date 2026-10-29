@@ -26,11 +26,14 @@ import {
 /**
  * The BullMQ queue backing a {@link QueueSystem} with the given generics.
  */
-type QueueOf<
-	TInput extends JSONLike,
-	TOutput extends JSONLike,
-	TName extends string,
-> = Queue<TInput, TOutput, TName, TInput, TOutput, TName>;
+type QueueOf<TInput extends JSONLike, TOutput, TName extends string> = Queue<
+	TInput,
+	TOutput,
+	TName,
+	TInput,
+	TOutput,
+	TName
+>;
 
 /**
  * `T` when the lifecycle flag is `true`, `undefined` when it is `false`.
@@ -80,7 +83,7 @@ type WhenTrue<TFlag extends boolean, T> = TFlag extends true ? T : undefined;
  */
 export class QueueSystem<
 	TInput extends JSONLike = JSONLike,
-	TOutput extends JSONLike = JSONLike,
+	TOutput = JSONLike,
 	TName extends string = string,
 	out TConnected extends boolean = boolean,
 	out TStarted extends boolean = boolean,
@@ -248,17 +251,9 @@ export class QueueSystem<
 			builderOrBuild instanceof ProcessorBuilder
 				? builderOrBuild
 				: builderOrBuild(ProcessorBuilder.init<TInput>());
-		const processor = builder.build();
-
-		this._ensureQueue();
-		this._worker = new Worker<TInput, TOutput, TName>(
-			this.name,
-			processor as unknown as Processor<TInput, TOutput, TName>,
-			{
-				connection: this._connection,
-				concurrency: this._concurrency,
-				metrics: { maxDataPoints: MetricsTime.ONE_WEEK * 2 },
-			},
+		this._startWorker(
+			this._connection,
+			builder.build() as unknown as Processor,
 		);
 
 		return this as unknown as QueueSystem<
@@ -268,6 +263,75 @@ export class QueueSystem<
 			true,
 			true
 		>;
+	}
+
+	/**
+	 * Start the worker with a plain handler instead of a step processor — the
+	 * same as handing a function to a raw BullMQ `Worker`. Useful for simple
+	 * command queues (an API call, a webhook) where steps don't make sense but
+	 * you still want the queue's visibility, retries and typed input.
+	 *
+	 * The handler receives the job typed with the input schema, and the queue's
+	 * output type is exactly what the handler returns.
+	 *
+	 * ```ts
+	 * const sendEmail = new QueueSystem(NameFactory({ name: "sendEmail" }))
+	 *   .defineInputSchema(z.object({ to: z.string() }))
+	 *   .defineConnection(connection)
+	 *   .defineHandler(async (job) => mailer.send(job.data.to));
+	 * ```
+	 *
+	 * Like `defineProcessor`, calling this before `defineConnection(...)` is a
+	 * type error, and the result has non-optional `queue` and `worker`.
+	 */
+	defineHandler<TNewOutput>(
+		this: QueueSystem<TInput, TOutput, TName, true, TStarted>,
+		handler: (
+			job: Job<TInput, unknown, TName>,
+			token?: string,
+		) => Promise<TNewOutput>,
+	): QueueSystem<TInput, TNewOutput, TName, true, true>;
+
+	defineHandler<TNewOutput>(
+		handler: (
+			job: Job<TInput, unknown, TName>,
+			token?: string,
+		) => Promise<TNewOutput>,
+	): QueueSystem<TInput, TNewOutput, TName, true, true> {
+		if (!this._connection) {
+			throw new Error(
+				"defineConnection(...) must be called before defineHandler(...)",
+			);
+		}
+		this._startWorker(this._connection, handler as unknown as Processor);
+
+		return this as unknown as QueueSystem<
+			TInput,
+			TNewOutput,
+			TName,
+			true,
+			true
+		>;
+	}
+
+	private _startWorker(connection: ConnectionOptions, processor: Processor) {
+		// A second worker on the same queue would race the first for jobs with
+		// different code, and close() could only ever close the newer one.
+		if (this._worker) {
+			throw new Error(
+				"This queue already has a worker: call defineProcessor(...) or defineHandler(...) once per QueueSystem, not both.",
+			);
+		}
+		this._ensureQueue();
+		this._worker = new Worker<TInput, TOutput, TName>(
+			this.name,
+			processor as Processor<TInput, TOutput, TName>,
+			{
+				connection,
+				concurrency: this._concurrency,
+				metrics: { maxDataPoints: MetricsTime.ONE_WEEK * 2 },
+			},
+		);
 	}
 
 	private _requireQueue(): QueueOf<TInput, TOutput, TName> {

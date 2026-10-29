@@ -47,7 +47,7 @@ Opts a processor in to step lifecycle logging (start, finish, rollback, and simi
 
 ### `addStep(stepConfig)`
 
-Two overloads, distinguished by whether `stepConfig` includes a `childQueue`.
+Three overloads, distinguished by whether `stepConfig` includes a `childQueue`, a `childQueues` record, or neither.
 
 **Plain step:**
 
@@ -90,10 +90,40 @@ addStep<
 }): ProcessorBuilder<..., TErrors, TProtected | TRollbackKeys[number]>
 ```
 
+**Parallel child step** (adds `childQueues`: several queues fanned out to at once, results grouped per queue):
+
+```ts
+addStep<
+  TName extends string,
+  TStepOutput,
+  TChildQueues extends Record<string, AnyChildQueue>,
+  const TSingle extends ParallelSingleChild<TChildQueues> = false,
+  TChildResult = ParallelChildResults<TChildQueues, TSingle>,
+  const TRollbackKeys extends readonly PropertyKey[] = readonly [],
+  const TClean extends readonly PropertyKey[] = readonly [],
+>(stepConfig: {
+  name: TName;
+  handler: (job, token) => Promise<TStepOutput>;
+  childQueues: TChildQueues;
+  childQueue?: never;
+  singleChild?: TSingle; // true, or a record like { ebay: true } naming keys of childQueues
+  processChildResult?: (results: ParallelChildResults<TChildQueues, TSingle>) => TChildResult | Promise<TChildResult>;
+  rollbackKeys?: TRollbackKeys;
+  rollback?: (job, token) => void | Promise<void>;
+  clean?: TClean;
+  progressReport?: (job, token, stepName, status) => void | Promise<void>;
+}): ProcessorBuilder<..., TErrors, TProtected | TRollbackKeys[number]>
+```
+
+`ParallelChildResults<TChildQueues, TSingle>` maps each key `K` of `childQueues` to `QueueOutput<TChildQueues[K]>[]`, or to `QueueOutput<TChildQueues[K]> | undefined` when `singleChild` is `true` or marks `K` as `true`. `ParallelSingleChild<TChildQueues>` is `boolean | { readonly [K in keyof TChildQueues]?: boolean }`.
+
 Runs `_push` internally, which throws `AddStepError` synchronously (at build time, not job-run time) for:
 
 - A duplicate step name.
 - A `clean` entry that names a key reserved by this or an earlier step's `rollbackKeys`.
+- A step with both `childQueue` and `childQueues`.
+- The same queue listed under more than one key in `childQueues`.
+- A `singleChild` record key that isn't a key of `childQueues`.
 
 See [Steps & Data Accumulation](../guides/steps) and [Waiting on Child Jobs](../guides/child-queues).
 
@@ -171,6 +201,6 @@ Groups several standalone steps under one namespace: purely an organizational id
 | `SkipToFinalError` | `job.actionErrors.skipToFinal` | Thrown by handler code to jump straight to the final step. Caught internally, not a job failure. |
 | `EarlyExitError` | `job.actionErrors.earlyExit` | Thrown by handler code to end the processor immediately with a given return value. Caught internally, not a job failure. |
 | `RecoverWithChildError` | `job.actionErrors.recover` | Thrown by handler code to add a child job and retry this same step once it completes. Caught internally; only becomes a job failure if `maxAttempts` is exceeded. |
-| `RecoverAttemptsExceededError` | The running processor | A step's `recover` calls exceeded `maxAttempts`. Rollbacks run first, then the job fails with this error. |
+| `RecoverAttemptsExceededError` | The running processor | A step's `recover` calls exceeded `maxAttempts`. Rollbacks run first, then the job fails with this error. Extends BullMQ's `UnrecoverableError`, so the job isn't retried. |
 
 See [Errors, Control Flow & Rollbacks](../guides/errors) and [Recovering From a Failure](../guides/recovering) for how these are used from inside a handler.

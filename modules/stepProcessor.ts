@@ -1,4 +1,4 @@
-import { type Job, WaitingChildrenError } from "bullmq";
+import { type Job, UnrecoverableError, WaitingChildrenError } from "bullmq";
 import { FINAL_STEP_NAME } from "./processorBuilder.ts";
 import {
 	actionErrors,
@@ -67,6 +67,56 @@ export function createJobProxy<TInput, TErrors extends ErrorRegistry>(
 			return typeof val === "function" ? val.bind(target) : val;
 		},
 	}) as unknown as TypedJob<TInput, TErrors>;
+}
+
+/**
+ * Group a parallel child step's results by the key each queue was given in
+ * `childQueues`. `getChildrenValues()` keys each value by the child job's key
+ * (`<prefix>:<queue>:<id>`), so a result belongs to the queue whose qualified
+ * name prefixes it. Children on a queue not listed in `childQueues` are dropped.
+ */
+function groupByChildQueue(
+	childQueues: NonNullable<StepConfig["childQueues"]>,
+	keys: string[],
+	values: Record<string, unknown>,
+	singleChild: StepConfig["singleChild"],
+): Record<string, unknown> {
+	const grouped: Record<string, unknown> = {};
+	for (const [groupName, childQueue] of Object.entries(childQueues)) {
+		const prefix = `${childQueue.queue?.qualifiedName ?? `bull:${childQueue.name}`}:`;
+		const groupValues = keys
+			.filter((key) => key.startsWith(prefix))
+			.map((key) => values[key]);
+		const single =
+			typeof singleChild === "object"
+				? singleChild[groupName] === true
+				: singleChild === true;
+		grouped[groupName] = single ? groupValues[0] : groupValues;
+	}
+	return grouped;
+}
+
+/**
+ * Whether BullMQ will retry `job` after it fails with `err`. Mirrors BullMQ's
+ * own `Job.shouldRetryJob`: another attempt remains, the job wasn't discarded,
+ * and the error isn't an `UnrecoverableError`.
+ *
+ * Rollbacks only run when this is false. A retry resumes on the failed step,
+ * so the steps before it must keep their effects: rolling them back on every
+ * failed attempt would leave the retry running against undone work.
+ */
+function willRetry(job: Job, err: unknown): boolean {
+	if (
+		err instanceof UnrecoverableError ||
+		(err instanceof Error && err.name === "UnrecoverableError")
+	) {
+		return false;
+	}
+	// `discarded` is protected on Job; read it the same way BullMQ does.
+	if ((job as unknown as { discarded?: boolean }).discarded) {
+		return false;
+	}
+	return job.attemptsMade + 1 < (job.opts.attempts ?? 1);
 }
 
 const MAX_STEP_COUNT = 100;
@@ -260,21 +310,36 @@ export function StepProcessor<TInput, TResult>(
 				const unconsumedKeys = Object.keys(childrenJobValues)
 					.filter((key) => !consumedKeys.includes(key))
 					.sort();
-				if (unconsumedKeys.length > 0) {
-					const childValues = unconsumedKeys.map(
-						(key) => childrenJobValues[key],
-					);
+				// Write results whenever there are new children to consume, and also
+				// when the handler added none at all, so `<step>-results` always has
+				// the shape its type promises ([] / undefined / one key per queue).
+				// The second check is skipped if results were already saved: a worker
+				// restarting after the save (but before advancing) sees no new
+				// children and must not overwrite the real results with empty ones.
+				const resultsKey = `${String(previousStep)}-results` as ResultsName;
+				if (unconsumedKeys.length > 0 || !(resultsKey in jobData)) {
 					consumedKeys = [...consumedKeys, ...unconsumedKeys];
 
-					let values: unknown = stepConfig.singleChild
-						? childValues[0]
-						: childValues;
+					let values: unknown;
+					if (stepConfig.childQueues) {
+						values = groupByChildQueue(
+							stepConfig.childQueues,
+							unconsumedKeys,
+							childrenJobValues,
+							stepConfig.singleChild,
+						);
+					} else {
+						const childValues = unconsumedKeys.map(
+							(key) => childrenJobValues[key],
+						);
+						values =
+							stepConfig.singleChild === true ? childValues[0] : childValues;
+					}
 
 					if (stepConfig.processChildResult) {
 						values = await stepConfig.processChildResult(values);
 					}
 
-					const resultsKey = `${String(previousStep)}-results` as ResultsName;
 					jobData.consumedKeys = consumedKeys;
 					jobData[resultsKey] = values;
 					await job.updateData({
@@ -419,10 +484,18 @@ export function StepProcessor<TInput, TResult>(
 						recovering = true;
 						return undefined;
 					}
-					await executeRollbacks(job, jobProxy, token, processorConfig);
+					const retrying = willRetry(job, err);
+					if (!retrying) {
+						await executeRollbacks(job, jobProxy, token, processorConfig);
+					}
 					const elapsedFail =
 						Date.now() - (stepTimings[String(currentStep)] ?? Date.now());
-					await reportStep(stepDisplayName, `Failed after ${elapsedFail}ms`);
+					await reportStep(
+						stepDisplayName,
+						retrying
+							? `Failed after ${elapsedFail}ms, will retry`
+							: `Failed after ${elapsedFail}ms`,
+					);
 					throw err;
 				});
 

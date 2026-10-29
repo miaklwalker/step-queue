@@ -108,9 +108,9 @@ all work (the examples below use Zod).
 
 | Concept | Role |
 | --- | --- |
-| `QueueSystem` | Fluent builder that owns a BullMQ `Queue` and `Worker`. Enqueues jobs and defines the steps that process them. |
+| `QueueSystem` | Fluent builder that owns a BullMQ `Queue` and `Worker`. Enqueues jobs, and either defines the steps that process them (`defineProcessor`) or processes them with one plain function (`defineHandler`). |
 | `ProcessorBuilder` | Accumulates steps and their types. Usually received via `defineProcessor`'s callback, but can also be constructed standalone with `ProcessorBuilder.init<T>()` and passed to `defineProcessor` directly. |
-| A step | One unit of work: a `handler`, plus optional `rollback`, `clean`, `progressReport`, and (for fan-out) `childQueue`. |
+| A step | One unit of work: a `handler`, plus optional `rollback`, `clean`, `progressReport`, and (for fan-out) `childQueue` or `childQueues`. |
 | `TypedJob` | The `job` a handler receives — a normal BullMQ `Job` with `data` narrowed to the type accumulated so far, plus `errors`, `actionErrors`, and `updateStepProgress`. |
 | `QueueOnly` | A producer-only counterpart to `QueueSystem` — enqueues jobs without starting a worker. |
 | `NameFactory` | Builds a queue's internal `name` (used for the BullMQ queue key) and a human-readable `displayName`. |
@@ -460,9 +460,11 @@ throws immediately with a message pointing at the missing `.errors()`
 registration, rather than silently producing `undefined`.
 
 An error thrown from a handler that is not one of the control-flow actions
-above (including a registered typed error) fails the step: the processor runs
-rollbacks for every completed step, in reverse order, and re-throws — which
-BullMQ records as a failed job.
+above (including a registered typed error) fails the step and is re-thrown,
+which BullMQ records as a failed attempt. If attempts remain (the default is
+`3`), BullMQ retries the job and it resumes on the failed step. Only once no
+retries remain does the processor run rollbacks for every completed step, in
+reverse order. Throw BullMQ's `UnrecoverableError` to fail immediately.
 
 ---
 
@@ -471,6 +473,11 @@ BullMQ records as a failed job.
 A step can declare a `rollback`, run only if a *later* step in the same job
 fails. Rollbacks run in reverse completion order — the most recently completed
 step rolls back first.
+
+Rollbacks wait for the job's **final** failure. While attempts remain, a failed
+step is simply retried — the retry resumes on that step, so every step before
+it keeps its work. Rollbacks run once, when the job fails for good: on its last
+attempt, or immediately for an `UnrecoverableError`.
 
 By default a rollback receives no job data at all: it has to explicitly ask for
 what it needs via `rollbackKeys`. Requesting a key does two things — it narrows
@@ -501,7 +508,8 @@ const queue = new QueueSystem(NameFactory({ name: "charge" }))
 			}),
 	);
 
-// "chargeCard" fails → reserveFunds's rollback runs before the job is marked failed.
+// "chargeCard" fails on its last attempt → reserveFunds's rollback runs before
+// the job is marked failed. Earlier failed attempts just retry "chargeCard".
 ```
 
 Attempting to name a key in `rollbackKeys` that is neither part of the step's
@@ -534,7 +542,7 @@ ProcessorBuilder.init<{ a: number; b: string }>()
 Every job's BullMQ progress carries a `steps` object, maintained automatically
 — no configuration needed. Each key is a step's name; each value is one of
 `"not_started"`, `"running"`, `"Finished in <N>ms"`, `"Skipped after <N>ms"`,
-`"Failed after <N>ms"`, or `"Recovering (attempt <n>/<max>)"`. The final step
+`"Failed after <N>ms, will retry"`, `"Failed after <N>ms"`, or `"Recovering (attempt <n>/<max>)"`. The final step
 is reported under the key `"final"`.
 
 ```ts
@@ -644,12 +652,96 @@ Options on a child step:
   step named `"fanOut"` produces `job.data["fanOut-results"]` for every later
   step.
 
+### Fanning out to several queues in parallel
+
+When one step needs to hand work to several *different* queues at once —
+listing a product on eBay, Shopify, and Amazon, say — use `childQueues`
+instead of `childQueue`. It takes a record of queues; the handler enqueues to
+any of them, every child runs at the same time on its own queue's worker, and
+the parent waits once for all of them. `<step>-results` becomes an object with
+one key per entry in `childQueues`, each typed by *that* queue's output:
+
+```ts
+.addStep({
+	name: "list",
+	childQueues: { ebay: ebayQueue, shopify: shopifyQueue, amazon: amazonQueue },
+	// eBay and Amazon run at most one child each: store their output unwrapped.
+	// Shopify isn't listed, so it keeps an array (one entry per variant).
+	singleChild: { ebay: true, amazon: true },
+	handler: async (job) => {
+		const { sku, title, asin, variants } = job.data;
+		await Promise.all([
+			ebayQueue.addChildJob(job, { sku, title }),
+			shopifyQueue.addBulkChildJobs(
+				job,
+				variants.map((v) => ({ data: { sku, size: v.size, price: v.price } })),
+			),
+			asin ? amazonQueue.addChildJob(job, { sku, asin }) : undefined,
+		]);
+	},
+})
+// job.data["list-results"] is typed:
+// {
+//   ebay: EbayOutput | undefined;
+//   shopify: ShopifyOutput[];
+//   amazon: AmazonOutput | undefined;
+// }
+```
+
+- Without `singleChild`, every key holds an array of that queue's outputs (an
+  empty array if the handler added no jobs to it).
+- `singleChild: true` unwraps every queue; a record like `{ ebay: true }`
+  unwraps only the queues it names. An unwrapped queue is `T | undefined`,
+  since the handler may skip it. Misspelled keys are a compile error.
+- `processChildResult` receives the grouped object and can reshape it.
+- Compared to one `childQueue` step per channel, the parent waits for the
+  *slowest* channel instead of the *sum* of all of them — while keeping the
+  same per-queue type safety.
+- Failures behave as for any child step: if a child fails, the parent stays in
+  waiting-children until that child is retried and completes.
+
+See [`examples/parallelChannelListing.ts`](examples/parallelChannelListing.ts)
+for a runnable version.
+
 Internally, a step with a `childQueue` moves the parent job into BullMQ's
 "waiting-children" state after the handler runs (via `moveToWaitingChildren`).
 Once every child job completes, the processor collects `job.getChildrenValues()`,
 applies `singleChild` / `processChildResult`, stores the result, and continues
 to the next step — deduplicating against previously consumed children so a
 step is never double-processed if the worker restarts mid-wait.
+
+---
+
+## Simple handler queues
+
+Not every queue is a pipeline. For simple command queues — an API call, a
+webhook, a Slack message — where steps don't make sense but you still want the
+queue's retries, concurrency, and visibility, use `defineHandler` instead of
+`defineProcessor`. It starts the worker with one plain function, exactly like
+a raw BullMQ `Worker`:
+
+```ts
+const slackNotifyQueue = new QueueSystem(NameFactory({ name: "SlackNotify" }))
+	.defineInputSchema(z.object({ channel: z.string(), text: z.string() }))
+	.defineConnection(connection)
+	.defineHandler(async (job) => {
+		// job.data is typed { channel: string; text: string }
+		const res = await slack.chat.postMessage(job.data);
+		return res.ts; // QueueOutput<typeof slackNotifyQueue> is string
+	});
+```
+
+- `job.data` is typed (and validated on enqueue) from `defineInputSchema`.
+- The queue's output type is exactly what the handler returns, and doesn't
+  have to be an object.
+- `job` is a plain BullMQ `Job`, not a `TypedJob`: no `errors`,
+  `actionErrors`, `updateStepProgress`, or rollbacks, since there are no steps.
+  A retry re-runs the whole handler.
+- A handler queue can be a `childQueue` (or an entry in `childQueues`) like
+  any other, and its output type flows into the parent's `<step>-results`.
+
+See [`examples/simpleHandler.ts`](examples/simpleHandler.ts) for a runnable
+version.
 
 ---
 
@@ -710,7 +802,8 @@ Recovering reuses the same `moveToWaitingChildren` / `WaitingChildrenError`
 mechanism as a `childQueue` step, so BullMQ never sees a `'failed'` event and
 the job's `attempts` budget isn't spent while it waits. Each step tracks its
 own recovery attempts; exceeding `options.maxAttempts` (default `3`) runs
-rollbacks and fails the job with `RecoverAttemptsExceededError`, so a fix that
+rollbacks and fails the job for good with `RecoverAttemptsExceededError` (an
+`UnrecoverableError`, so it isn't retried), so a fix that
 doesn't actually resolve the problem can't loop forever. A recovery child's
 result isn't merged into the job data — it's treated as a side effect, not a
 data source, so the retried step should re-derive anything it needs rather
@@ -775,9 +868,10 @@ than a bare string) is the usual pattern for child queues, since the parent's
 | Method | Purpose |
 | --- | --- |
 | `defineInputSchema(schema)` | Sets the Standard Schema (Zod, Valibot, ArkType, ...) that types and validates job input. |
-| `defineConnection(options)` | Sets the BullMQ `ConnectionOptions` (Redis). Required before `defineProcessor`. Narrows `queue` from `Queue \| undefined` to `Queue`. |
+| `defineConnection(options)` | Sets the BullMQ `ConnectionOptions` (Redis). Required before `defineProcessor` / `defineHandler`. Narrows `queue` from `Queue \| undefined` to `Queue`. |
 | `defineConcurrency(n)` | Sets worker concurrency. Defaults to `1`. |
 | `defineProcessor(buildOrBuilder)` | Declares steps and starts the `Queue` + `Worker`. Takes either a callback receiving a typed `ProcessorBuilder`, or a standalone `ProcessorBuilder` instance (un-built). Requires a connected system — calling it first is a compile error. Narrows `worker` from `Worker \| undefined` to `Worker`. |
+| `defineHandler(handler)` | The step-less alternative to `defineProcessor`: starts the `Worker` with one plain function. The queue's output type is whatever the handler returns. Same connection requirement and narrowing as `defineProcessor`. |
 | `addDescription(text)` / `addToSystem(text)` | Free-form metadata fields for organizing queues; not used by the engine itself. |
 | `addJob(data, options?)` | Validates and enqueues one job. |
 | `addBulkJobs(jobs)` | Validates and enqueues many jobs in one call. |
@@ -787,7 +881,7 @@ than a bare string) is the usual pattern for child queues, since the parent's
 | `addWorkerEventListener(event, cb)` / `removeWorkerEventListener(event, cb)` | Typed wrappers around the underlying `Worker`'s event emitter. |
 | `close()` | Gracefully closes the worker, queue, and queue events. |
 | `queue` | The underlying BullMQ `Queue`, created on first access once a connection exists. `Queue \| undefined` before `defineConnection`, plain `Queue` after it. |
-| `worker` | The underlying BullMQ `Worker`. `Worker \| undefined` before `defineProcessor`, plain `Worker` after it. |
+| `worker` | The underlying BullMQ `Worker`. `Worker \| undefined` before `defineProcessor` / `defineHandler`, plain `Worker` after it. |
 
 ### Lifecycle narrowing
 
@@ -823,9 +917,9 @@ function enqueueOnly<In extends JSONLike>(q: QueueSystem<In, JSONLike, string, t
 }
 ```
 
-The same mechanism enforces call order. `defineProcessor` declares a `this`
-parameter requiring a connected system, so getting the order wrong fails to
-compile rather than throwing at startup:
+The same mechanism enforces call order. `defineProcessor` and `defineHandler`
+both declare a `this` parameter requiring a connected system, so getting the
+order wrong fails to compile rather than throwing at startup:
 
 ```ts
 new QueueSystem(NameFactory({ name: "MyCoolQueue" })).defineProcessor((step) =>
@@ -859,16 +953,19 @@ Every job added through `addJob` / `addBulkJobs` (on both `QueueSystem` and
 
 ```ts
 {
-	removeOnComplete: { age: 60 * 60 * 24, count: 1000 }, // 1 day, capped at 1000
-	removeOnFail: { age: 60 * 60 * 24 * 7 },               // 7 days
-	attempts: 1,
+	removeOnComplete: { count: 1000 },
+	removeOnFail: { count: 3000 },
+	attempts: 3,
 }
 ```
 
-`attempts: 1` means BullMQ-level retries are off by default. To enable retries,
-raise `attempts` per job — because the processor persists its position in the
-job data, a retried job resumes from the step that failed rather than restarting
-from its input.
+`attempts: 3` means a failed job is tried up to three times in total (the first
+run plus two retries) before it is marked failed for good. Retries run
+immediately, with no backoff. Pass `attempts` (and optionally `backoff`) per
+job to change this; `attempts: 1` turns retries off. Because the processor
+persists its position in the job data, a retried step-processor job resumes
+from the step that failed rather than restarting from its input; a
+`defineHandler` job re-runs its whole handler.
 
 ---
 

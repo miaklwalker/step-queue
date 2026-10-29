@@ -3,7 +3,7 @@ title: "Workers, Concurrency & Progress"
 description: "How QueueSystem starts a BullMQ worker, tuning concurrency, listening to worker events, and reporting step progress."
 ---
 
-`defineProcessor` is what actually starts a BullMQ `Worker`: everything before it (`defineInputSchema`, `defineConnection`, `defineConcurrency`) only configures what that worker will be.
+`defineProcessor` (or its step-less counterpart, `defineHandler`) is what actually starts a BullMQ `Worker`: everything before it (`defineInputSchema`, `defineConnection`, `defineConcurrency`) only configures what that worker will be. Everything on this page applies to both, except the step-progress sections (`progress.steps`, `updateStepProgress`, and step lifecycle logging), which only exist for step processors. A handler queue reports progress with BullMQ's own `job.updateProgress(...)`. See [Simple Handler Queues](handlers).
 
 ## Starting the worker
 
@@ -76,7 +76,8 @@ Every job's BullMQ progress carries a `steps` object, maintained automatically �
 - `"running"` — the step's handler is currently executing (or, for a step with a `childQueue`, waiting on its children)
 - `"Finished in <N>ms"` — the step completed successfully
 - `"Skipped after <N>ms"` — `job.actionErrors.skip`/`skipToFinal` bypassed it
-- `"Failed after <N>ms"` — the handler threw and the job is failing
+- `"Failed after <N>ms, will retry"` — the handler threw, and BullMQ will retry the job (it resumes on this step; nothing is rolled back)
+- `"Failed after <N>ms"` — the handler threw on the job's final attempt; rollbacks have run and the job is failing
 - `"Recovering (attempt <n>/<max>)"` — a `RecoverWithChildError` child job is in flight for this step
 
 The final step (implicit or explicit) is reported under the key `"final"`.

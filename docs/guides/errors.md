@@ -96,11 +96,13 @@ A typed error is not a control-flow action: it fails the step exactly like any o
 
 ## What happens when a step fails
 
-An error thrown from a handler that is not one of the control-flow actions above (including a registered typed error) fails the step: the processor runs rollbacks for every completed step, in reverse order, and re-throws, which BullMQ records as a failed job. If the job's `attempts` option allows another try, BullMQ retries it and the processor resumes from the failed step; see [Resuming After Failure](resuming).
+An error thrown from a handler that is not one of the control-flow actions above (including a registered typed error) fails the step and is re-thrown, which BullMQ records as a failed attempt. If the job's `attempts` option allows another try (the default is `3`), BullMQ retries it and the processor resumes from the failed step; see [Resuming After Failure](resuming). Only once no retries remain does the processor run rollbacks for every completed step, in reverse order, before the job is marked failed. To fail a job immediately without retries, throw BullMQ's `UnrecoverableError`.
 
 ## Rollbacks
 
 A step can declare a `rollback`, run only if a *later* step in the same job fails. Rollbacks run in reverse completion order: the most recently completed step rolls back first.
+
+Rollbacks wait for the job's **final** failure. While BullMQ still has attempts left, a failed step is retried without rolling anything back: the retry resumes on the failed step, so every step before it keeps its work. Rollbacks run once, when the job fails for good: on its last attempt, or immediately if the handler throws BullMQ's `UnrecoverableError` (which skips retries). In Bull Board, a step that failed but will retry shows `Failed after <n>ms, will retry` in `progress.steps`.
 
 By default a rollback receives no job data at all: it has to explicitly ask for what it needs via `rollbackKeys`. Requesting a key does two things: it narrows `job.data` inside `rollback` to exactly those keys, and it reserves those keys so neither this step nor any later step can `clean` them, guaranteeing they still exist if the rollback actually runs.
 
@@ -129,7 +131,8 @@ const queue = new QueueSystem(NameFactory({ name: "charge" }))
       }),
   );
 
-// "chargeCard" fails → reserveFunds's rollback runs before the job is marked failed.
+// "chargeCard" fails on its last attempt → reserveFunds's rollback runs before the job
+// is marked failed. Earlier failed attempts just retry "chargeCard".
 ```
 
 Attempting to name a key in `rollbackKeys` that is neither part of the step's input nor its own output is a compile error, and attempting to `clean` a key reserved by `rollbackKeys` (from this or an earlier step) throws `AddStepError` at build time:

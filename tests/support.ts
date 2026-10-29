@@ -56,7 +56,7 @@ export async function closeAll(): Promise<void> {
  */
 export async function runToCompletion<
 	TInput extends Record<string, unknown>,
-	TOutput extends Record<string, unknown>,
+	TOutput,
 	TName extends string,
 >(queue: QueueSystem<TInput, TOutput, TName>, input: TInput): Promise<TOutput> {
 	const job = await queue.addJob(input);

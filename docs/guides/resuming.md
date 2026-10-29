@@ -21,14 +21,17 @@ Every job added through `addJob` / `addBulkJobs` picks up these defaults unless 
 {
   removeOnComplete: { count: 1000 },
   removeOnFail: { count: 3000 },
-  attempts: 1,
+  attempts: 3,
 }
 ```
 
-`attempts: 1` means BullMQ-level retries are off by default. To enable retries, raise `attempts` per job:
+`attempts: 3` means a failed job is tried up to three times in total (the first run plus two retries) before it is marked failed for good. Retries run immediately, with no backoff. To change this for one job, pass `attempts` (and optionally `backoff`) per call; `attempts: 1` turns retries off:
 
 ```ts
-await myQueue.addJob({ email: "user@example.com" }, { attempts: 5 });
+await myQueue.addJob(
+  { email: "user@example.com" },
+  { attempts: 5, backoff: { type: "exponential", delay: 1000 } },
+);
 ```
 
 To change these defaults project-wide instead of per call, add a `stepqueue.config.ts` next to `package.json`:
@@ -38,7 +41,7 @@ import { defineQueueDefaults } from "@michaelrwalker/step-queue";
 
 export default defineQueueDefaults({
   removeOnComplete: { count: 5000 },
-  attempts: 3,
+  attempts: 5,
 });
 ```
 
@@ -79,7 +82,7 @@ const signup = new QueueSystem(NameFactory({ name: "signup", env: "example" }))
   );
 ```
 
-On the first attempt, `"validate"` runs and completes; `"reserveUsername"` throws. BullMQ marks the job failed and, because `attempts` is greater than 1, schedules a retry. The retry re-enters the processor with `job.data.step === "reserveUsername"` and `job.data.validated === true` already present. `"validate"` does not run again.
+On the first attempt, `"validate"` runs and completes; `"reserveUsername"` throws. BullMQ marks the job failed and, because `attempts` is greater than 1, schedules a retry. The retry re-enters the processor with `job.data.step === "reserveUsername"` and `job.data.validated === true` already present. `"validate"` does not run again, and it isn't rolled back between attempts either: rollbacks only run if the job's final attempt fails.
 
 ## Writing idempotent steps
 
@@ -91,7 +94,7 @@ Because a step can run more than once (its own retries, or a worker restart mid-
 
 ## What is *not* automatically retried
 
-A handler that throws one of `job.actionErrors` (`skip`, `skipToFinal`, `earlyExit`) is not a failure: those are control-flow signals the processor handles itself, not something BullMQ retries. See [Errors, Control Flow & Rollbacks](errors). Only an error that reaches BullMQ as a job failure triggers a retry (subject to `attempts`), and rollbacks for every completed step run first, in reverse order, before the error is re-thrown.
+A handler that throws one of `job.actionErrors` (`skip`, `skipToFinal`, `earlyExit`) is not a failure: those are control-flow signals the processor handles itself, not something BullMQ retries. See [Errors, Control Flow & Rollbacks](errors). Only an error that reaches BullMQ as a job failure triggers a retry (subject to `attempts`). Rollbacks don't run on a failure that will be retried, since the retry resumes on the failed step and needs the earlier steps' work intact. They run once, in reverse order, when the job fails for good: on its last attempt, or immediately for an `UnrecoverableError`.
 
 `job.actionErrors.recover` is similar but not identical: while it's waiting on its fix job, the job is parked in BullMQ's `WaitingChildren` state, not failed, so it doesn't consume an `attempts` retry either. It only becomes a real, rollback-triggering failure if the step exceeds its own `maxAttempts`. See [Recovering From a Failure](recovering).
 

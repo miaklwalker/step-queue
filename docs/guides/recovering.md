@@ -67,7 +67,7 @@ Because parking a job in `WaitingChildren` is not the same as failing it, none o
 
 Only the specific error you choose to catch and recover from should trigger this — a step should still let unrelated errors fail it normally (rollbacks run, BullMQ retries), rather than treating every failure as fixable.
 
-Even a targeted match can loop forever if the fix job runs but doesn't actually resolve the problem. Each step tracks its own recovery attempts; once a step exceeds `maxAttempts` (default `3`), the processor stops recovering, runs rollbacks for every completed step, and fails the job with a `RecoverAttemptsExceededError`:
+Even a targeted match can loop forever if the fix job runs but doesn't actually resolve the problem. Each step tracks its own recovery attempts; once a step exceeds `maxAttempts` (default `3`), the processor stops recovering, runs rollbacks for every completed step, and fails the job with a `RecoverAttemptsExceededError`. That error extends BullMQ's `UnrecoverableError`, so the job fails for good immediately instead of spending its remaining `attempts` re-hitting the same exhausted step:
 
 ```ts
 throw new job.actionErrors.recover(

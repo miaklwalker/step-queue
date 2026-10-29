@@ -1,5 +1,5 @@
 import type { StandardSchemaV1 } from "@standard-schema/spec";
-import type { Job } from "bullmq";
+import { type Job, UnrecoverableError } from "bullmq";
 import type { QueueSystem } from "./queueSystem.ts";
 
 /** Flattens an intersection into a single, readable object type. */
@@ -67,7 +67,14 @@ export type StepConfig = {
 	) => void | Promise<void>;
 	// biome-ignore lint/suspicious/noExplicitAny: QueueSystem's generics are invariant, so no wider concrete instantiation accepts every child queue
 	childQueue?: QueueSystem<any, any, any, any, any>;
-	singleChild?: boolean;
+	/**
+	 * Parallel child step: child results are grouped by queue under these keys.
+	 * Mutually exclusive with `childQueue`.
+	 */
+	// biome-ignore lint/suspicious/noExplicitAny: QueueSystem's generics are invariant, so no wider concrete instantiation accepts every child queue
+	childQueues?: Record<string, QueueSystem<any, any, any, any, any>>;
+	/** `true` for every child; a parallel step may name its single queues instead. */
+	singleChild?: boolean | Record<string, boolean>;
 	// biome-ignore lint/suspicious/noExplicitAny: contravariant parameter accepting any step's child-result shape
 	processChildResult?: (results: any) => unknown;
 };
@@ -160,8 +167,12 @@ export class RecoverWithChildError<
 	}
 }
 
-/** Thrown when a step's recover attempts exceed its `maxAttempts`; fails the job. */
-export class RecoverAttemptsExceededError extends Error {
+/**
+ * Thrown when a step's recover attempts exceed its `maxAttempts`; fails the
+ * job. An `UnrecoverableError`, so BullMQ fails it outright instead of spending
+ * the job's remaining `attempts` re-hitting the same exhausted step.
+ */
+export class RecoverAttemptsExceededError extends UnrecoverableError {
 	constructor(
 		public readonly stepName: string,
 		public readonly maxAttempts: number,
